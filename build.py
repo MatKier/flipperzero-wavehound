@@ -13,6 +13,7 @@ Usage:
   python3 build.py --manuf path/to/manuf   # use a local manuf file instead
   python3 build.py --skip-db           # just build (keep existing assets/oui.db)
   python3 build.py --no-build          # only (re)generate the db
+  python3 build.py --launch            # build, then upload+run on a connected Flipper
   python3 build.py -- --target f7 ...  # args after -- are passed to ufbt
 
 Needs ufbt on PATH (https://github.com/flipperdevices/flipperzero-ufbt) and,
@@ -47,14 +48,17 @@ def build_db(manuf):
     run(cmd)
 
 
-def build_fap(ufbt, extra):
+def build_fap(ufbt, launch, extra):
     exe = shutil.which(ufbt)
     if not exe:
         sys.exit(
             f"'{ufbt}' not found on PATH. Install it with "
             "'pip install ufbt' (see flipperzero-ufbt), or pass --no-build."
         )
-    run([exe, *extra], cwd=APP_DIR)
+    # `ufbt launch` builds, uploads the .fap to a connected Flipper and runs it;
+    # plain `ufbt` just builds.
+    cmd = [exe] + (["launch"] if launch else []) + list(extra)
+    run(cmd, cwd=APP_DIR)
 
 
 def main():
@@ -62,6 +66,11 @@ def main():
     ap.add_argument("--manuf", help="local Wireshark manuf file (default: download)")
     ap.add_argument("--skip-db", action="store_true", help="do not regenerate oui.db")
     ap.add_argument("--no-build", action="store_true", help="only build the db, skip ufbt")
+    ap.add_argument(
+        "--launch",
+        action="store_true",
+        help="after building, upload the .fap to a connected Flipper and run it (ufbt launch)",
+    )
     ap.add_argument("--ufbt", default="ufbt", help="ufbt command (default: ufbt)")
     ap.add_argument("ufbt_args", nargs="*", help="args passed through to ufbt (after --)")
     args = ap.parse_args()
@@ -72,7 +81,7 @@ def main():
         print(f"warning: --skip-db but {DB_PATH} does not exist", file=sys.stderr)
 
     if not args.no_build:
-        build_fap(args.ufbt, args.ufbt_args)
+        build_fap(args.ufbt, args.launch, args.ufbt_args)
 
     print("Done.", file=sys.stderr)
 

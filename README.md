@@ -43,7 +43,7 @@ is why Wavehound ships custom firmware rather than building on it.
 | **Hunt access point** | Pick how long to listen: 5, 10 or 30 seconds, or 1, 2 or 5 minutes. Press **OK** during the listen to stop early and jump straight to the results. The board listens on every channel and lists only access points, strongest first, by SSID (hidden networks show their BSSID). Pick one to open its details (vendor, type, signal), then hunt. |
 | **Search devices** | First pick the channel: **All channels (hop)**, **Channel 1–13**, or **Channel of nearby AP…**, which runs an AP listen so you can pick a network and borrow its channel. Then the same timed listen (5 s to 5 min, OK to stop early), with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
 | **Enter MAC** | Type a MAC on the hex keypad (pre-filled with your last target), then pick the channel the same way: **Auto (hop until heard)**, a channel number, or a nearby AP's channel. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
-| **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel and signal. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution uses a small built-in table plus the optional `oui.db` on the SD card for full coverage (see [Vendor database](#vendor-database)). |
+| **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel and signal. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution needs the `oui.db` database; without it, other MACs show "Unknown" (see [Vendor database](#vendor-database)). |
 | **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout, a COLD/COOL/WARM/HOT! label, a meter with peak marker and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels. After 8 s of silence it hops again to re-find the target. Press **Right** to save the current target as a named favorite. |
 | **Saved MACs** | Favorites you saved from the hunt screen, kept on the SD card (`/ext/apps_data/wavehound/saved.txt`). Pick one for **Hunt / Edit / Delete**. Hunt opens the channel picker with the saved channel pre-selected, so you can accept it, choose another, or switch to Auto. Edit fixes the name, MAC or channel (each field pre-filled). Delete removes it. Saving a randomized (`*`) MAC is of little use since it rotates. |
 | **Channel spectrum** | The board sweeps channels 1–13 (120 ms dwell each) in promiscuous mode. The Flipper draws one bar per channel with peak hold, a sweep cursor, the busiest channel, and the number of distinct transmitters heard per sweep. You can switch the metric between packets, max dBm and bytes. |
@@ -73,7 +73,7 @@ flipper_app/  Flipper external app (uFBT)
                           board info, name input, saved MACs, saved entry,
                           edit saved, about)
   wh_store.c              saved MACs: load/add/update/delete on the SD card
-  wh_oui.c                vendor lookup (built-in table + SD oui.db)
+  wh_oui.c                vendor lookup from the SD oui.db
   views/wh_hunt_view.c    hunt screen + Geiger click thread
   views/wh_progress_view.c search progress screen
   views/wh_spectrum_view.c spectrum screen
@@ -86,10 +86,9 @@ docs/PROTOCOL.md  the UART protocol
 ## Vendor database
 
 The device-details screen shows the manufacturer behind a MAC, resolved from
-its OUI (the first 3 bytes). A small built-in table covers a few common vendors
-with zero setup; full coverage comes from `oui.db`, a sorted fixed-width binary
-(3-byte OUI + name) the app binary-searches by seeking, so it stays fast and
-never loads into RAM.
+its OUI (the first 3 bytes). Vendor names come from `oui.db`, a sorted
+fixed-width binary (3-byte OUI + name) the app binary-searches by seeking, so
+it stays fast and never loads into RAM.
 
 Build the app with the database bundled in:
 
@@ -97,6 +96,7 @@ Build the app with the database bundled in:
 python3 build.py                        # download manuf, build oui.db, run ufbt
 python3 build.py --manuf path/to/manuf  # use a local manuf file instead
 python3 build.py --no-build             # only (re)generate the db
+python3 build.py --launch               # build, then upload + run on the Flipper
 ```
 
 `build.py` writes the db to `flipper_app/assets/oui.db`, which the manifest
@@ -110,8 +110,8 @@ The app looks for the database in two places, in order:
 2. `/ext/apps_assets/wavehound/oui.db` — the bundled copy
 
 So it works out of the box, and you can refresh the data without rebuilding by
-dropping a newer `oui.db` in `apps_data`. Without any database, lookups fall
-back to the built-in table or show "Unknown"; randomized (`*`) MACs show
+dropping a newer `oui.db` in `apps_data`. Without any database, non-randomized
+MACs show "Unknown"; randomized (`*`) MACs show
 `randomized`. The data comes from Wireshark's `manuf` (derived from the IEEE
 registry); redistribute per its terms with attribution.
 

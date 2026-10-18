@@ -1,5 +1,4 @@
 #include "wh_oui.h"
-#include "wh_oui_builtin.h"
 
 #include <furi.h>
 #include <storage/storage.h>
@@ -17,16 +16,6 @@
 #define WH_OUI_DB_BUNDLED APP_ASSETS_PATH("oui.db")
 #define WH_OUI_RECORD 32 /* 3-byte OUI + 29-byte NUL-padded name */
 #define WH_OUI_NAME 29
-
-static bool lookup_builtin(const uint8_t oui[3], char* out, size_t out_size) {
-    for(size_t i = 0; i < COUNT_OF(wh_oui_builtin); i++) {
-        if(memcmp(wh_oui_builtin[i].oui, oui, 3) == 0) {
-            strlcpy(out, wh_oui_builtin[i].name, out_size);
-            return true;
-        }
-    }
-    return false;
-}
 
 /* Binary search a sorted fixed-width oui.db on the SD card, if present. */
 static bool lookup_file(const char* path, const uint8_t oui[3], char* out, size_t out_size) {
@@ -82,7 +71,6 @@ void wh_oui_lookup(const uint8_t mac[6], char* out, size_t out_size) {
     }
 
     const uint8_t oui[3] = {mac[0], mac[1], mac[2]};
-    if(lookup_builtin(oui, out, out_size)) return;
     if(lookup_file(WH_OUI_DB_USER, oui, out, out_size)) return;
     if(lookup_file(WH_OUI_DB_BUNDLED, oui, out, out_size)) return;
     strlcpy(out, "Unknown", out_size);
