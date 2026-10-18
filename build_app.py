@@ -9,12 +9,12 @@ Steps:
   2. Build the .fap with ufbt.
 
 Usage:
-  python3 build.py                     # download manuf, build db, then ufbt
-  python3 build.py --manuf path/to/manuf   # use a local manuf file instead
-  python3 build.py --skip-db           # just build (keep existing assets/oui.db)
-  python3 build.py --no-build          # only (re)generate the db
-  python3 build.py --launch            # build, then upload+run on a connected Flipper
-  python3 build.py -- --target f7 ...  # args after -- are passed to ufbt
+  python3 build_app.py                     # download manuf, build db, then ufbt
+  python3 build_app.py --manuf path/to/manuf   # use a local manuf file instead
+  python3 build_app.py --skip-db           # just build (keep existing assets/oui.db)
+  python3 build_app.py --no-build          # only (re)generate the db
+  python3 build_app.py --launch            # build, then upload+run on a connected Flipper
+  python3 build_app.py -- --target f7 ...  # args after -- are passed to ufbt
 
 Needs ufbt on PATH (https://github.com/flipperdevices/flipperzero-ufbt) and,
 for the db download, network access.
