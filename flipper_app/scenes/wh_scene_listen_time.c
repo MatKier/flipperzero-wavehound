@@ -14,7 +14,9 @@ void wh_scene_listen_time_on_enter(void* context) {
     submenu_reset(submenu);
     submenu_set_header(
         submenu,
-        app->search_kind == WhSearchAccessPoints ? "Listen for networks" : "Listen for devices");
+        app->search_kind == WhSearchAccessPoints ? "Listen for networks" :
+        app->search_kind == WhSearchClients      ? "Listen for clients" :
+                                                    "Listen for devices");
 
     char label[24];
     for(size_t i = 0; i < COUNT_OF(listen_options); i++) {

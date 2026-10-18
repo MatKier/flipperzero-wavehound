@@ -11,3 +11,4 @@ flipper_app/assets/oui.db
 .vscode/
 __pycache__/
 *.pyc
+oui.db

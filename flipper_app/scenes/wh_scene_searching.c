@@ -13,10 +13,14 @@ static void wh_scene_searching_finish_callback(void* context) {
 
 void wh_scene_searching_on_enter(void* context) {
     WavehoundApp* app = context;
-    const bool aps = app->search_kind == WhSearchAccessPoints;
-    /* AP listens always hop; device listens may be parked on one channel. */
-    const uint8_t channel = aps ? 0 : app->device_channel;
+    const WhSearchKind kind = app->search_kind;
+    const bool aps = kind == WhSearchAccessPoints;
+    const bool clients = kind == WhSearchClients;
+    /* AP listens always hop; device listens may be parked on one channel;
+     * client listens park on the chosen AP's channel. */
+    const uint8_t channel = aps ? 0 : clients ? app->clients_ap.channel : app->device_channel;
     const uint16_t secs = app->listen_seconds;
+    const char* noun = aps ? "Networks" : clients ? "Clients" : "Devices";
 
     char duration[8];
     if(secs >= 60) {
@@ -26,12 +30,17 @@ void wh_scene_searching_on_enter(void* context) {
     }
     char title[24];
     if(channel) {
-        snprintf(title, sizeof(title), "%s %s ch%u", aps ? "Networks" : "Devices", duration, channel);
+        snprintf(title, sizeof(title), "%s %s ch%u", noun, duration, channel);
     } else {
-        snprintf(title, sizeof(title), "%s %s", aps ? "Networks" : "Devices", duration);
+        snprintf(title, sizeof(title), "%s %s", noun, duration);
     }
-    char cmd[32];
-    snprintf(cmd, sizeof(cmd), "DISCOVER,%u,%s,%u", secs, aps ? "AP" : "STA", channel);
+    char cmd[48];
+    if(clients) {
+        snprintf(
+            cmd, sizeof(cmd), "DISCOVER,%u,CLIENTS,%u,%s", secs, channel, app->clients_ap.mac);
+    } else {
+        snprintf(cmd, sizeof(cmd), "DISCOVER,%u,%s,%u", secs, aps ? "AP" : "STA", channel);
+    }
 
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
     app->result_count = 0;

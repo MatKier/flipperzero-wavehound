@@ -57,10 +57,11 @@ typedef enum {
     WhChannelForMacHunt,
 } WhChannelPurpose;
 
-/** What the Searching scene listens for (both are timed passive listens). */
+/** What the Searching scene listens for (all are timed passive listens). */
 typedef enum {
     WhSearchAccessPoints, /* access points only */
     WhSearchDevices,      /* every transmitter that is not an access point */
+    WhSearchClients,      /* stations associated with a chosen access point */
 } WhSearchKind;
 
 /** One huntable thing: an access point or any other transmitter heard. */
@@ -111,6 +112,11 @@ typedef struct {
 
     WhTarget target; /* what the Hunt scene follows */
     uint8_t mac_bytes[6]; /* ByteInput buffer, keeps the last entered MAC */
+
+    /* The access point whose clients we are listing (WhSearchClients), chosen
+     * via the device-search "Clients of nearby AP..." picker. */
+    WhTarget clients_ap;
+    bool device_search_clients; /* device search picked a nearby AP: scope to its clients */
 
     /* Board Info text, filled by the UART worker between INFO_BEGIN/INFO_END
      * (guarded by results_mutex). */

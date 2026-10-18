@@ -92,6 +92,9 @@ static uint16_t s_unique_count;
 static discover_dev_t s_devs[DISCOVER_MAX];
 static volatile uint16_t s_dev_count;
 static volatile radio_discover_filter_t s_disc_filter;
+/* Target AP for DISCOVER_FILTER_CLIENTS. Set before promiscuous mode is enabled
+ * (same hand-off as s_target), then read by the callback. */
+static uint8_t s_disc_bssid[6];
 
 /* Radio-task-only state. */
 static uint8_t s_channel = 1;
@@ -154,6 +157,17 @@ static void discover_frame(const uint8_t *hdr, uint16_t len, int8_t rssi, uint8_
     const uint8_t *tx = hdr + 10;
     if (tx[0] & 0x01) {
         return;
+    }
+
+    if (s_disc_filter == DISCOVER_FILTER_CLIENTS) {
+        /* A client of the target AP: a data frame headed to the distribution
+         * system (ToDS=1, FromDS=0) whose receiver (addr1) is the BSSID. The
+         * transmitter (addr2 = tx) is the client; idle clients still send
+         * power-save Null frames this way. Management frames (DS bits 0) and
+         * AP->STA data (FromDS) fail the check and are left out. */
+        if ((hdr[1] & 0x03) != 0x01 || memcmp(hdr + 4, s_disc_bssid, 6) != 0) {
+            return;
+        }
     }
 
     /* Beacon (0x80) or probe response (0x50) carry SSID and channel IEs. */
@@ -377,6 +391,7 @@ static bool discover_wanted(const discover_dev_t *d)
     switch (s_disc_filter) {
     case DISCOVER_FILTER_AP: return d->flags & DEV_FLAG_AP;
     case DISCOVER_FILTER_STA: return !(d->flags & DEV_FLAG_AP);
+    /* CLIENTS already filtered on insert: everything recorded is wanted. */
     default: return true;
     }
 }
@@ -391,16 +406,18 @@ static uint16_t discover_count_wanted(void)
     return n;
 }
 
-static void discover_start(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel)
+static void discover_start(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel,
+                           const uint8_t *bssid)
 {
     set_mode(MODE_IDLE);
     s_dev_count = 0;
     s_disc_filter = filter;
     s_disc_channel = channel;
+    memcpy(s_disc_bssid, bssid ? bssid : (const uint8_t[6]){0}, 6);
     s_disc_start = xTaskGetTickCount();
     s_disc_last_progress = s_disc_start;
     s_disc_duration = pdMS_TO_TICKS((uint32_t)seconds * 1000);
-    static const char *const names[] = {"ALL", "AP", "STA"};
+    static const char *const names[] = {"ALL", "AP", "STA", "CLIENTS"};
     proto_sendf("DISCOVER_BEGIN,%u,%s,%u", seconds, names[filter], channel);
     led_set(40, 0, 60);
     set_channel(channel ? channel : 1);
@@ -497,7 +514,7 @@ static void radio_task(void *arg)
                 spectrum_start();
                 break;
             case CMD_DISCOVER:
-                discover_start(cmd.seconds, cmd.filter, cmd.channel);
+                discover_start(cmd.seconds, cmd.filter, cmd.channel, cmd.mac);
                 break;
             case CMD_FINISH:
                 /* Cut a listen short and report what was heard so far. */
@@ -571,10 +588,14 @@ void radio_spectrum(void)
     post(&cmd);
 }
 
-void radio_discover(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel)
+void radio_discover(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel,
+                    const uint8_t bssid[6])
 {
-    const radio_cmd_t cmd = {
+    radio_cmd_t cmd = {
         .type = CMD_DISCOVER, .seconds = seconds, .filter = filter, .channel = channel};
+    if (bssid) {
+        memcpy(cmd.mac, bssid, 6); /* reused by discover_start as the CLIENTS target */
+    }
     post(&cmd);
 }
 

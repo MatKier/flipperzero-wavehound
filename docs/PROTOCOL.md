@@ -12,7 +12,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `PING`                | Liveness check. Board answers `PONG,<version>`.                |
 | `HUNT,<mac>,<ch>[,PIN]` | Track frames transmitted by `<mac>` on channel `<ch>`. `ch=0` hops until the target is heard. `PIN` (needs `ch>0`) keeps the radio on `<ch>` even when the target goes quiet. |
 | `SPECTRUM`            | Sweep channels 1..N, report per-channel activity.              |
-| `DISCOVER,<seconds>[,ALL\|AP\|STA[,<ch>]]` | Listen for 1-600 s, then report the transmitters heard. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels. |
+| `DISCOVER,<seconds>[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]]` | Listen for 1-600 s, then report the transmitters heard. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
 | `FINISH`              | End a running `DISCOVER` now and report what was heard so far (same `DEV`/`DISCOVER_END` lines). Ignored in other modes. |
 | `STOP`                | Return to idle (radio listening off). Cancels a `DISCOVER` without a report. |
@@ -43,6 +43,12 @@ management frames where it is the BSSID (addr2 == addr3), or data frames coming
 from the distribution system (FromDS=1, ToDS=0). The last two catch an AP
 whose beacon was missed. With the `AP` filter, other frames are not even
 recorded, so stations cannot fill up the table.
+
+A station counts as a client of an AP (the `CLIENTS` filter) when it sends a
+data frame to the distribution system (ToDS=1, FromDS=0) whose receiver
+(addr1) is the AP's BSSID; the transmitter (addr2) is the client. Even an idle
+client is caught this way through its power-save Null frames. Clients are
+reported as ordinary station `DEV` lines (flag `S`, no SSID).
 
 Hunting works for any transmitter MAC, not just access points: the board
 matches the frame's transmitter address (addr2) of management and data frames.

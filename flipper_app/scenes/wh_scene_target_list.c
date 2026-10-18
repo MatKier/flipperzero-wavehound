@@ -26,17 +26,26 @@ void wh_scene_target_list_on_enter(void* context) {
     char header[40];
     char label[64];
 
+    const WhSearchKind kind = app->search_kind;
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
     const size_t count = app->result_count;
     if(count == 0) {
         strlcpy(
             header,
-            app->search_kind == WhSearchAccessPoints ? "No networks found" : "Nothing heard",
+            kind == WhSearchAccessPoints ? "No networks found" :
+            kind == WhSearchClients      ? "No clients found" :
+                                           "Nothing heard",
             sizeof(header));
     } else if(app->picking_ap_channel) {
-        strlcpy(header, "Use channel of:", sizeof(header));
+        strlcpy(
+            header,
+            app->channel_purpose == WhChannelForDeviceSearch ? "Clients of which AP:" :
+                                                               "Use channel of:",
+            sizeof(header));
     } else {
-        const char* noun = app->search_kind == WhSearchAccessPoints ? "networks" : "devices";
+        const char* noun = kind == WhSearchAccessPoints ? "networks" :
+                           kind == WhSearchClients      ? "clients" :
+                                                          "devices";
         if(app->result_total > count) {
             snprintf(
                 header, sizeof(header), "%u %s, top %u", app->result_total, noun, (unsigned)count);
@@ -63,7 +72,8 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     WavehoundApp* app = context;
 
     if(event.type == SceneManagerEventTypeBack) {
-        /* Skip the finished Searching scene. */
+        /* Skip the finished Searching scene. The clients search kind stays set,
+         * so re-picking a listen time scopes to the same AP. */
         static const uint32_t targets[] = {WhSceneListenTime, WhSceneStart};
         scene_manager_search_and_switch_to_previous_scene_one_of(
             app->scene_manager, targets, COUNT_OF(targets));
@@ -88,10 +98,13 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     if(!picked) return false;
 
     if(app->picking_ap_channel) {
-        /* Borrow the AP's channel and hand control back to ChannelSelect. */
         if(app->channel_purpose == WhChannelForDeviceSearch) {
-            app->device_channel = picked_target.channel;
+            /* Device search scoped to this AP: list the stations associated with
+             * it, on its channel. Searching reads clients_ap. */
+            app->clients_ap = picked_target;
+            app->device_search_clients = true;
         } else {
+            /* MAC hunt only needs the channel number to pin the typed MAC. */
             app->target.channel = picked_target.channel;
             app->target.pin_channel = true;
         }
@@ -103,8 +116,11 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     }
 
     app->target = picked_target;
-    /* A device search parked on a channel by the user keeps the hunt there too. */
-    app->target.pin_channel = app->search_kind == WhSearchDevices && app->device_channel != 0;
+    /* A device search parked on a channel by the user keeps the hunt there too;
+     * a client is always on its AP's channel, so pin the hunt there as well. */
+    app->target.pin_channel =
+        (app->search_kind == WhSearchDevices && app->device_channel != 0) ||
+        app->search_kind == WhSearchClients;
 
     /* Pre-fill manual entry with the last target. */
     wh_parse_mac(app->target.mac, app->mac_bytes);

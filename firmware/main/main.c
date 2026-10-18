@@ -85,9 +85,9 @@ static void handle_hunt(char *args)
 
 static void handle_discover(char *args)
 {
-    /* args: "<seconds>[,ALL|AP|STA[,<ch>]]" */
-    char *f[3] = {0};
-    int n = split_args(args, f, 3);
+    /* args: "<seconds>[,ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]" */
+    char *f[4] = {0};
+    int n = split_args(args, f, 4);
     int seconds = n >= 1 ? atoi(f[0]) : 0;
     radio_discover_filter_t filter = DISCOVER_FILTER_ALL;
     int ch = 0;
@@ -97,8 +97,10 @@ static void handle_discover(char *args)
             filter = DISCOVER_FILTER_AP;
         } else if (strcasecmp(f[1], "STA") == 0) {
             filter = DISCOVER_FILTER_STA;
+        } else if (strcasecmp(f[1], "CLIENTS") == 0) {
+            filter = DISCOVER_FILTER_CLIENTS;
         } else if (strcasecmp(f[1], "ALL") != 0) {
-            proto_sendf("ERR,filter must be ALL, AP or STA");
+            proto_sendf("ERR,filter must be ALL, AP, STA or CLIENTS");
             return;
         }
     }
@@ -106,12 +108,18 @@ static void handle_discover(char *args)
         proto_sendf("ERR,bad channel");
         return;
     }
+    uint8_t bssid[6];
+    if (filter == DISCOVER_FILTER_CLIENTS && (n < 4 || !parse_mac(f[3], bssid))) {
+        proto_sendf("ERR,CLIENTS needs a BSSID: DISCOVER,<secs>,CLIENTS,<ch>,<bssid>");
+        return;
+    }
     if (seconds < 1 || seconds > DISCOVER_MAX_SECONDS) {
-        proto_sendf("ERR,usage DISCOVER,<1-600>[,ALL|AP|STA[,<ch>]]");
+        proto_sendf("ERR,usage DISCOVER,<1-600>[,ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]");
         return;
     }
     proto_sendf("OK,DISCOVER");
-    radio_discover((uint16_t)seconds, filter, (uint8_t)ch);
+    radio_discover((uint16_t)seconds, filter, (uint8_t)ch,
+                   filter == DISCOVER_FILTER_CLIENTS ? bssid : NULL);
 }
 
 static void handle_line(char *line)

@@ -12,7 +12,9 @@ static void wh_scene_channel_select_callback(void* context, uint32_t index) {
 /* Continue to whatever needed the channel. */
 static void wh_scene_channel_select_proceed(WavehoundApp* app) {
     if(app->channel_purpose == WhChannelForDeviceSearch) {
-        app->search_kind = WhSearchDevices;
+        /* A nearby AP was picked -> scope to its clients; a plain channel -> all
+         * devices on it. */
+        app->search_kind = app->device_search_clients ? WhSearchClients : WhSearchDevices;
         scene_manager_next_scene(app->scene_manager, WhSceneListenTime);
     } else {
         scene_manager_next_scene(app->scene_manager, WhSceneHunt);
@@ -33,7 +35,11 @@ void wh_scene_channel_select_on_enter(void* context) {
         wh_scene_channel_select_callback,
         app);
     submenu_add_item(
-        submenu, "Channel of nearby AP...", ITEM_FROM_AP, wh_scene_channel_select_callback, app);
+        submenu,
+        device_search ? "Clients of nearby AP..." : "Channel of nearby AP...",
+        ITEM_FROM_AP,
+        wh_scene_channel_select_callback,
+        app);
     char label[16];
     for(uint32_t ch = 1; ch <= WH_MAX_CHANNEL; ch++) {
         snprintf(label, sizeof(label), "Channel %lu", (unsigned long)ch);
@@ -74,6 +80,7 @@ bool wh_scene_channel_select_on_event(void* context, SceneManagerEvent event) {
     const uint8_t ch = (uint8_t)event.event; /* 0 = all / auto */
     if(app->channel_purpose == WhChannelForDeviceSearch) {
         app->device_channel = ch;
+        app->device_search_clients = false; /* a plain channel: all devices, not scoped */
     } else {
         app->target.channel = ch;
         app->target.pin_channel = ch != 0;
