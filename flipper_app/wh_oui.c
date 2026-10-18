@@ -8,8 +8,13 @@
 #ifndef APP_DATA_PATH
 #define APP_DATA_PATH(p) EXT_PATH("apps_data/wavehound/" p)
 #endif
+#ifndef APP_ASSETS_PATH
+#define APP_ASSETS_PATH(p) EXT_PATH("apps_assets/wavehound/" p)
+#endif
 
-#define WH_OUI_DB APP_DATA_PATH("oui.db")
+/* User-supplied override first, then the database bundled with the app. */
+#define WH_OUI_DB_USER APP_DATA_PATH("oui.db")
+#define WH_OUI_DB_BUNDLED APP_ASSETS_PATH("oui.db")
 #define WH_OUI_RECORD 32 /* 3-byte OUI + 29-byte NUL-padded name */
 #define WH_OUI_NAME 29
 
@@ -23,13 +28,13 @@ static bool lookup_builtin(const uint8_t oui[3], char* out, size_t out_size) {
     return false;
 }
 
-/* Binary search the sorted fixed-width oui.db on the SD card, if present. */
-static bool lookup_file(const uint8_t oui[3], char* out, size_t out_size) {
+/* Binary search a sorted fixed-width oui.db on the SD card, if present. */
+static bool lookup_file(const char* path, const uint8_t oui[3], char* out, size_t out_size) {
     bool found = false;
     Storage* storage = furi_record_open(RECORD_STORAGE);
     File* f = storage_file_alloc(storage);
 
-    if(storage_file_open(f, WH_OUI_DB, FSAM_READ, FSOM_OPEN_EXISTING)) {
+    if(storage_file_open(f, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
         const uint64_t size = storage_file_size(f);
         size_t lo = 0;
         size_t hi = (size_t)(size / WH_OUI_RECORD);
@@ -78,6 +83,7 @@ void wh_oui_lookup(const uint8_t mac[6], char* out, size_t out_size) {
 
     const uint8_t oui[3] = {mac[0], mac[1], mac[2]};
     if(lookup_builtin(oui, out, out_size)) return;
-    if(lookup_file(oui, out, out_size)) return;
+    if(lookup_file(WH_OUI_DB_USER, oui, out, out_size)) return;
+    if(lookup_file(WH_OUI_DB_BUNDLED, oui, out, out_size)) return;
     strlcpy(out, "Unknown", out_size);
 }
