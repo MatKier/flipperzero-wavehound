@@ -40,6 +40,8 @@ typedef enum {
     WhEventBoardInfoReady,
     WhEventSaveTarget,
     WhEventNameEntered,
+    WhEventDetailsHunt,
+    WhEventDetailsSave,
 } WhCustomEvent;
 
 /** A hunt target the user saved by name, persisted to the SD card. */

@@ -109,7 +109,7 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     /* Pre-fill manual entry with the last target. */
     wh_parse_mac(app->target.mac, app->mac_bytes);
     scene_manager_set_scene_state(app->scene_manager, WhSceneTargetList, event.event);
-    scene_manager_next_scene(app->scene_manager, WhSceneHunt);
+    scene_manager_next_scene(app->scene_manager, WhSceneDetails);
     return true;
 }
 
