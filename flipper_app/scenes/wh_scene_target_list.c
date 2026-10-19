@@ -9,6 +9,7 @@
  * never touches existing rows (the submenu keeps the user's highlight put). */
 static size_t s_shown;
 static size_t s_header_count; /* count last written to the header */
+static uint8_t s_spin; /* animated scan indicator phase */
 
 static void wh_scene_target_list_callback(void* context, uint32_t index) {
     WavehoundApp* app = context;
@@ -60,8 +61,16 @@ static void wh_scene_target_list_set_header(WavehoundApp* app, size_t count) {
     } else if(!app->uart) {
         strlcpy(header, "USART busy!", sizeof(header));
     } else {
+        /* A block bouncing across a bracketed field -- reads as a radar
+         * scanning, even at zero found. Every frame holds the same glyphs
+         * (one '#', three spaces), so the header width stays constant; the
+         * proportional header font would otherwise make the line jitter as
+         * the block moved. */
+        static const char* const scan_frames[] = {
+            "[#   ]", "[ #  ]", "[  # ]", "[   #]", "[  # ]", "[ #  ]"};
+        const char* bar = scan_frames[s_spin % (sizeof(scan_frames) / sizeof(scan_frames[0]))];
         snprintf(
-            header, sizeof(header), "Scanning... %u %s", (unsigned)count,
+            header, sizeof(header), "Scan %s %u %s", bar, (unsigned)count,
             wh_scene_target_list_noun(app->search_kind));
     }
     submenu_set_header(app->submenu, header);
@@ -105,10 +114,15 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
                 app->submenu, label, s_shown + 1, wh_scene_target_list_callback, app);
         }
         furi_mutex_release(app->results_mutex);
-        if(count != s_header_count) {
-            s_header_count = count;
+        /* While a live scan is on, refresh every tick so the sweep animates;
+         * otherwise only rewrite the header when the count actually changes. */
+        if(app->uart && !app->picking_ap_channel) {
+            s_spin++;
+            wh_scene_target_list_set_header(app, count);
+        } else if(count != s_header_count) {
             wh_scene_target_list_set_header(app, count);
         }
+        s_header_count = count;
         return false;
     }
 
