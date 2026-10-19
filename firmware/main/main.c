@@ -21,7 +21,6 @@
 #include "radio.h"
 
 #define LINE_MAX 96
-#define DISCOVER_MAX_SECONDS 600
 
 static bool parse_mac(const char *s, uint8_t mac[6])
 {
@@ -85,41 +84,35 @@ static void handle_hunt(char *args)
 
 static void handle_discover(char *args)
 {
-    /* args: "<seconds>[,ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]" */
-    char *f[4] = {0};
-    int n = split_args(args, f, 4);
-    int seconds = n >= 1 ? atoi(f[0]) : 0;
+    /* args: "[ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]" */
+    char *f[3] = {0};
+    int n = split_args(args, f, 3);
     radio_discover_filter_t filter = DISCOVER_FILTER_ALL;
     int ch = 0;
 
-    if (n >= 2) {
-        if (strcasecmp(f[1], "AP") == 0) {
+    if (n >= 1) {
+        if (strcasecmp(f[0], "AP") == 0) {
             filter = DISCOVER_FILTER_AP;
-        } else if (strcasecmp(f[1], "STA") == 0) {
+        } else if (strcasecmp(f[0], "STA") == 0) {
             filter = DISCOVER_FILTER_STA;
-        } else if (strcasecmp(f[1], "CLIENTS") == 0) {
+        } else if (strcasecmp(f[0], "CLIENTS") == 0) {
             filter = DISCOVER_FILTER_CLIENTS;
-        } else if (strcasecmp(f[1], "ALL") != 0) {
+        } else if (strcasecmp(f[0], "ALL") != 0) {
             proto_sendf("ERR,filter must be ALL, AP, STA or CLIENTS");
             return;
         }
     }
-    if (n >= 3 && !parse_channel(f[2], &ch)) {
+    if (n >= 2 && !parse_channel(f[1], &ch)) {
         proto_sendf("ERR,bad channel");
         return;
     }
     uint8_t bssid[6];
-    if (filter == DISCOVER_FILTER_CLIENTS && (n < 4 || !parse_mac(f[3], bssid))) {
-        proto_sendf("ERR,CLIENTS needs a BSSID: DISCOVER,<secs>,CLIENTS,<ch>,<bssid>");
-        return;
-    }
-    if (seconds < 0 || seconds > DISCOVER_MAX_SECONDS) {
-        proto_sendf("ERR,usage DISCOVER,<0-600>[,ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]");
+    if (filter == DISCOVER_FILTER_CLIENTS && (n < 3 || !parse_mac(f[2], bssid))) {
+        proto_sendf("ERR,CLIENTS needs a BSSID: DISCOVER,CLIENTS,<ch>,<bssid>");
         return;
     }
     proto_sendf("OK,DISCOVER");
-    radio_discover((uint16_t)seconds, filter, (uint8_t)ch,
-                   filter == DISCOVER_FILTER_CLIENTS ? bssid : NULL);
+    radio_discover(filter, (uint8_t)ch, filter == DISCOVER_FILTER_CLIENTS ? bssid : NULL);
 }
 
 static void handle_line(char *line)
@@ -143,9 +136,6 @@ static void handle_line(char *line)
         handle_discover(args);
     } else if (strcmp(line, "INFO") == 0) {
         info_report();
-    } else if (strcmp(line, "FINISH") == 0) {
-        radio_finish();
-        proto_sendf("OK,FINISH");
     } else if (strcmp(line, "STOP") == 0) {
         radio_stop();
         proto_sendf("OK,STOP");

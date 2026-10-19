@@ -62,8 +62,6 @@ static int field_int(char** cursor) {
 static void wh_results_reset(WavehoundApp* app) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
     app->result_count = 0;
-    app->result_total = 0;
-    app->progress_found = 0;
     furi_mutex_release(app->results_mutex);
 }
 
@@ -138,15 +136,9 @@ static void wh_on_line(char* line, void* context) {
         }
     } else if(strcmp(tag, "INFO_END") == 0) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WhEventBoardInfoReady);
-    } else if(strcmp(tag, "DP") == 0) {
-        field_int(&cur); /* elapsed seconds; the progress view keeps its own clock */
-        app->progress_found = field_int(&cur);
-    } else if(strcmp(tag, "DISCOVER_END") == 0) {
-        field_int(&cur); /* sent */
-        app->result_total = field_int(&cur);
-        view_dispatcher_send_custom_event(app->view_dispatcher, WhEventResultsReady);
     }
-    /* READY / PONG / OK / ERR only refresh the liveness timestamp. */
+    /* DP progress and READY / PONG / OK / ERR only refresh the liveness
+     * timestamp: the live list counts its own rows. */
 }
 
 /* Hunt view asks (Right key) to save the current target. */

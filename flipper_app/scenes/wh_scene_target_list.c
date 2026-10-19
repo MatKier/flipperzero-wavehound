@@ -31,9 +31,8 @@ static const char* wh_scene_target_list_noun(WhSearchKind kind) {
                                           "devices";
 }
 
-/* Build the DISCOVER command for a continuous (seconds = 0) listen, mirroring the
- * channel rules of the old timed Searching scene: AP listens always hop; device
- * listens may be parked on one channel; client listens park on the AP's channel. */
+/* Build the DISCOVER command: AP listens always hop; device listens may be
+ * parked on one channel; client listens park on the chosen AP's channel. */
 static void wh_scene_target_list_send_discover(WavehoundApp* app) {
     const WhSearchKind kind = app->search_kind;
     const bool aps = kind == WhSearchAccessPoints;
@@ -42,9 +41,9 @@ static void wh_scene_target_list_send_discover(WavehoundApp* app) {
 
     char cmd[48];
     if(clients) {
-        snprintf(cmd, sizeof(cmd), "DISCOVER,0,CLIENTS,%u,%s", channel, app->clients_ap.mac);
+        snprintf(cmd, sizeof(cmd), "DISCOVER,CLIENTS,%u,%s", channel, app->clients_ap.mac);
     } else {
-        snprintf(cmd, sizeof(cmd), "DISCOVER,0,%s,%u", aps ? "AP" : "STA", channel);
+        snprintf(cmd, sizeof(cmd), "DISCOVER,%s,%u", aps ? "AP" : "STA", channel);
     }
     wh_send(app, cmd);
 }
@@ -72,8 +71,6 @@ static void wh_scene_target_list_set_header(WavehoundApp* app, size_t count) {
 static void wh_scene_target_list_restart(WavehoundApp* app) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
     app->result_count = 0;
-    app->result_total = 0;
-    app->progress_found = 0;
     furi_mutex_release(app->results_mutex);
     s_shown = 0;
     s_header_count = 0;

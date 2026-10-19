@@ -23,16 +23,13 @@ void radio_hunt(const uint8_t mac[6], uint8_t channel, bool pinned);
 void radio_spectrum(void);
 
 /**
- * Listen for `seconds` (hopping all channels, or only on `channel` if non-zero),
- * then report the transmitters matching `filter`. For DISCOVER_FILTER_CLIENTS,
- * `bssid` is the access point whose associated stations to report; it is ignored
- * (and may be NULL) for every other filter.
+ * Listen continuously (hopping all channels, or only on `channel` if non-zero),
+ * streaming each transmitter matching `filter` as it is first heard, until
+ * radio_stop(). For DISCOVER_FILTER_CLIENTS, `bssid` is the access point whose
+ * associated stations to report; it is ignored (and may be NULL) for every
+ * other filter.
  */
-void radio_discover(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel,
-                    const uint8_t bssid[6]);
-
-/** End a running listen now and report what was heard so far. */
-void radio_finish(void);
+void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t bssid[6]);
 
 /** Go idle. */
 void radio_stop(void);

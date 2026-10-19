@@ -31,8 +31,7 @@ typedef enum {
 } WhViewId;
 
 typedef enum {
-    WhEventResultsReady = 100,
-    WhEventMacEntered,
+    WhEventMacEntered = 100,
     WhEventChannelPicked,
     WhEventBoardInfoReady,
     WhEventSaveTarget,
@@ -94,8 +93,6 @@ typedef struct {
     FuriMutex* results_mutex;
     WhTarget results[WH_MAX_RESULTS];
     size_t result_count;
-    uint16_t result_total; /* devices heard, may exceed result_count */
-    volatile uint16_t progress_found;
 
     WhSearchKind search_kind;
 

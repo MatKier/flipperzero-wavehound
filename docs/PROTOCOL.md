@@ -12,10 +12,9 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `PING`                | Liveness check. Board answers `PONG,<version>`.                |
 | `HUNT,<mac>,<ch>[,PIN]` | Track frames transmitted by `<mac>` on channel `<ch>`. `ch=0` hops until the target is heard. `PIN` (needs `ch>0`) keeps the radio on `<ch>` even when the target goes quiet. |
 | `SPECTRUM`            | Sweep channels 1..N, report per-channel activity.              |
-| `DISCOVER,<seconds>[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]]` | Listen for 1-600 s, then report the transmitters heard; `<seconds>=0` listens **continuously** and streams each transmitter as it is first heard (until `STOP`). `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). |
+| `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
-| `FINISH`              | End a running timed `DISCOVER` now and report what was heard so far (same `DEV`/`DISCOVER_END` lines). Ignored in other modes, and in continuous `DISCOVER` (`<seconds>=0`), which already streams live — use `STOP` there. |
-| `STOP`                | Return to idle (radio listening off). Cancels a `DISCOVER` without a report. |
+| `STOP`                | Return to idle (radio listening off). Ends a running `DISCOVER`. |
 
 `<mac>` is `aa:bb:cc:dd:ee:ff` (case-insensitive).
 
@@ -30,10 +29,9 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `H,<ch>,<frames>,<last>,<avg>,<max>,<locked>`  | Hunt sample, every 100 ms. RSSI values in dBm, `0` when no frame was heard in the window. `locked` is `1` while parked on a channel, `0` while hopping. |
 | `S,<ch>,<frames>,<bytes>,<max_rssi>`           | Spectrum dwell result for one channel (120 ms dwell). |
 | `U,<unique>`                                   | End of a spectrum sweep: distinct transmitter MACs heard during it. |
-| `DISCOVER_BEGIN,<seconds>,<filter>,<ch>`       | Search started (`ch` 0 = hopping; `seconds` 0 = continuous). |
-| `DP,<elapsed_s>,<count>`                       | Search progress, once per second (timed and continuous). `count` only counts entries matching the filter. |
-| `DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid>` | One transmitter. In a timed search these come strongest first at the end (max 96); in a continuous search they stream one-shot in discovery order as each is first heard (also max 96). `rssi` is the strongest frame heard. `flags`: `A` access point (sent beacons) or `S` station, plus `R` if the MAC is locally administered (randomized). `ssid` (rest of line) is only set for access points. For APs, `ch` comes from the beacon's DS parameter set. |
-| `DISCOVER_END,<sent>,<total>`                  | Timed search finished. `total` (matching entries) can exceed `sent`. The board tracks up to 192 transmitters. A continuous search streams live and sends no `DISCOVER_END`. |
+| `DISCOVER_BEGIN,<filter>,<ch>`                 | Search started (`ch` 0 = hopping).    |
+| `DP,<elapsed_s>,<count>`                       | Search progress, once per second. `count` only counts entries matching the filter. |
+| `DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid>` | One transmitter, streamed once in discovery order as it is first heard (max 96; the board tracks up to 192). `rssi` is the strongest frame heard. `flags`: `A` access point (sent beacons) or `S` station, plus `R` if the MAC is locally administered (randomized). `ssid` (rest of line) is only set for access points. For APs, `ch` comes from the beacon's DS parameter set. |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |
 | `INFO_END`                                     | End of an `INFO` reply.               |

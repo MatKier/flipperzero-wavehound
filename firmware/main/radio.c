@@ -40,14 +40,12 @@ typedef enum {
     CMD_HUNT,
     CMD_SPECTRUM,
     CMD_DISCOVER,
-    CMD_FINISH,
 } radio_cmd_type_t;
 
 typedef struct {
     radio_cmd_type_t type;
     uint8_t mac[6];
     uint8_t channel;
-    uint16_t seconds;
     radio_discover_filter_t filter;
     bool pinned;
 } radio_cmd_t;
@@ -104,11 +102,9 @@ static uint8_t s_disc_channel; /* 0 = hop */
 static uint32_t s_hunt_quiet_periods;
 static uint32_t s_hunt_hop_periods;
 static TickType_t s_disc_start;
-static TickType_t s_disc_duration;
 static TickType_t s_disc_last_progress;
-static bool s_disc_continuous;     /* seconds == 0: stream devices until STOP */
-static uint16_t s_disc_cursor;     /* table slots already examined (continuous) */
-static uint16_t s_disc_streamed;   /* wanted DEV lines already sent (continuous) */
+static uint16_t s_disc_cursor;     /* table slots already examined */
+static uint16_t s_disc_streamed;   /* wanted DEV lines already sent */
 static uint16_t s_disc_prev_count; /* table size seen at the previous tick */
 
 static uint32_t mac_hash(const uint8_t *mac)
@@ -410,8 +406,7 @@ static uint16_t discover_count_wanted(void)
     return n;
 }
 
-static void discover_start(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel,
-                           const uint8_t *bssid)
+static void discover_start(radio_discover_filter_t filter, uint8_t channel, const uint8_t *bssid)
 {
     set_mode(MODE_IDLE);
     s_dev_count = 0;
@@ -420,13 +415,11 @@ static void discover_start(uint16_t seconds, radio_discover_filter_t filter, uin
     memcpy(s_disc_bssid, bssid ? bssid : (const uint8_t[6]){0}, 6);
     s_disc_start = xTaskGetTickCount();
     s_disc_last_progress = s_disc_start;
-    s_disc_duration = pdMS_TO_TICKS((uint32_t)seconds * 1000);
-    s_disc_continuous = seconds == 0; /* 0 = stream devices live until STOP */
     s_disc_cursor = 0;
     s_disc_streamed = 0;
     s_disc_prev_count = 0;
     static const char *const names[] = {"ALL", "AP", "STA", "CLIENTS"};
-    proto_sendf("DISCOVER_BEGIN,%u,%s,%u", seconds, names[filter], channel);
+    proto_sendf("DISCOVER_BEGIN,%s,%u", names[filter], channel);
     led_set(40, 0, 60);
     set_channel(channel ? channel : 1);
     set_mode(MODE_DISCOVER);
@@ -446,45 +439,10 @@ static void discover_emit_one(const discover_dev_t *d)
                 m[5], d->channel, d->rssi_max, d->frames, flags, d->ssid);
 }
 
-static void discover_report(void)
-{
-    static uint8_t order[DISCOVER_MAX];
-    const uint16_t heard = s_dev_count;
-    uint16_t total = 0;
-
-    /* Wanted entries, strongest first (insertion sort over indices). */
-    for (uint16_t i = 0; i < heard; i++) {
-        if (!discover_wanted(&s_devs[i])) {
-            continue;
-        }
-        const uint8_t idx = (uint8_t)i;
-        uint16_t j = total++;
-        while (j > 0 && s_devs[order[j - 1]].rssi_max < s_devs[idx].rssi_max) {
-            order[j] = order[j - 1];
-            j--;
-        }
-        order[j] = idx;
-    }
-
-    const uint16_t sent = total > DISCOVER_REPORT_MAX ? DISCOVER_REPORT_MAX : total;
-    for (uint16_t i = 0; i < sent; i++) {
-        discover_emit_one(&s_devs[order[i]]);
-    }
-    proto_sendf("DISCOVER_END,%u,%u", sent, total);
-}
-
-static void discover_finish(void)
-{
-    set_mode(MODE_IDLE);
-    vTaskDelay(pdMS_TO_TICKS(20)); /* let an in-flight callback finish */
-    discover_report();
-    led_set(0, 0, 8);
-}
-
-/* Continuous mode: emit DEV lines for wanted devices first seen a tick ago, so
- * the promiscuous callback has had time to fill their flags/frames/ssid (the
- * table is read lock-free, same as the timed report). Streams in discovery order
- * and never reorders, so the Flipper's live list can append without reshuffling. */
+/* Emit DEV lines for wanted devices first seen a tick ago, so the promiscuous
+ * callback (which writes the table lock-free) has had time to fill their
+ * flags/frames/ssid. Streams in discovery order and never reorders, so the
+ * Flipper's live list can append without reshuffling. */
 static void discover_stream(void)
 {
     const uint16_t ready = s_disc_prev_count;
@@ -501,13 +459,7 @@ static void discover_stream(void)
 static void discover_tick(void)
 {
     const TickType_t now = xTaskGetTickCount();
-    if (!s_disc_continuous && now - s_disc_start >= s_disc_duration) {
-        discover_finish();
-        return;
-    }
-    if (s_disc_continuous) {
-        discover_stream();
-    }
+    discover_stream();
     if (now - s_disc_last_progress >= pdMS_TO_TICKS(DISCOVER_PROGRESS_MS)) {
         s_disc_last_progress = now;
         proto_sendf("DP,%lu,%u", (unsigned long)((now - s_disc_start) / configTICK_RATE_HZ),
@@ -546,15 +498,7 @@ static void radio_task(void *arg)
                 spectrum_start();
                 break;
             case CMD_DISCOVER:
-                discover_start(cmd.seconds, cmd.filter, cmd.channel, cmd.mac);
-                break;
-            case CMD_FINISH:
-                /* Cut a timed listen short and report what was heard so far.
-                 * Continuous mode already streams live, so there is nothing to
-                 * flush: STOP ends it instead. */
-                if (s_mode == MODE_DISCOVER && !s_disc_continuous) {
-                    discover_finish();
-                }
+                discover_start(cmd.filter, cmd.channel, cmd.mac);
                 break;
             }
             continue;
@@ -622,20 +566,12 @@ void radio_spectrum(void)
     post(&cmd);
 }
 
-void radio_discover(uint16_t seconds, radio_discover_filter_t filter, uint8_t channel,
-                    const uint8_t bssid[6])
+void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t bssid[6])
 {
-    radio_cmd_t cmd = {
-        .type = CMD_DISCOVER, .seconds = seconds, .filter = filter, .channel = channel};
+    radio_cmd_t cmd = {.type = CMD_DISCOVER, .filter = filter, .channel = channel};
     if (bssid) {
         memcpy(cmd.mac, bssid, 6); /* reused by discover_start as the CLIENTS target */
     }
-    post(&cmd);
-}
-
-void radio_finish(void)
-{
-    const radio_cmd_t cmd = {.type = CMD_FINISH};
     post(&cmd);
 }
 

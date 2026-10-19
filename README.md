@@ -242,24 +242,14 @@ any serial terminal. See [docs/PROTOCOL.md](docs/PROTOCOL.md). Example:
 > HUNT,a4:2b:b0:11:22:33,6
 < OK,HUNT
 < H,6,9,-47,-48,-45,1
-> DISCOVER,10,AP
+> DISCOVER,AP            # scan continuously; AP filter, hop all channels
 < OK,DISCOVER
-< DISCOVER_BEGIN,10,AP
-< DP,1,4
-< ...
-< DEV,a4:2b:b0:11:22:33,6,-41,93,A,HomeNet
-< DISCOVER_END,1,1
-> DISCOVER,10,STA,6
-< ...
-< DEV,3a:4f:12:ab:cd:ef,6,-58,12,SR,
-< DISCOVER_END,1,1
-> DISCOVER,0,AP          # 0 = scan continuously (what the app uses)
-< OK,DISCOVER
-< DISCOVER_BEGIN,0,AP,0
+< DISCOVER_BEGIN,AP,0
 < DEV,a4:2b:b0:11:22:33,6,-41,93,A,HomeNet   # streamed as each AP is heard
 < DP,1,1
-< ...                    # no DISCOVER_END; STOP ends it
+< ...                    # keeps streaming until you STOP
 > STOP
+< OK,STOP
 ```
 
 ## Disclaimer
