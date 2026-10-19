@@ -97,10 +97,13 @@ void info_report(void)
     proto_sendf("INFO_BEGIN");
 
     const esp_app_desc_t *app = esp_app_get_description();
-    /* app->version is set by the build system (version.txt / PROJECT_VER, or
-     * `git describe` for a git checkout); fall back to our static version. */
-    proto_sendf("BI,Firmware,%s", app ? app->version : WH_FW_VERSION);
+    /* Our own firmware version, the same value READY/PONG report. */
+    proto_sendf("BI,Firmware,%s", WH_FW_VERSION);
     if (app) {
+        /* The build system's version string -- `git describe` for a git
+         * checkout (nearest tag / commit, +dirty), else version.txt or
+         * PROJECT_VER. Kept to identify exactly which build is flashed. */
+        proto_sendf("BI,Commit,%s", app->version);
         proto_sendf("BI,Built,%s %s", app->date, app->time);
         proto_sendf("BI,IDF (build),%s", app->idf_ver);
         char sha[17];
