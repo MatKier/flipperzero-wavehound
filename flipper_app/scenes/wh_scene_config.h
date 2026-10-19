@@ -1,7 +1,5 @@
 ADD_SCENE(wh, start, Start)
 ADD_SCENE(wh, channel_select, ChannelSelect)
-ADD_SCENE(wh, listen_time, ListenTime)
-ADD_SCENE(wh, searching, Searching)
 ADD_SCENE(wh, target_list, TargetList)
 ADD_SCENE(wh, details, Details)
 ADD_SCENE(wh, mac_input, MacInput)

@@ -113,8 +113,8 @@ static void handle_discover(char *args)
         proto_sendf("ERR,CLIENTS needs a BSSID: DISCOVER,<secs>,CLIENTS,<ch>,<bssid>");
         return;
     }
-    if (seconds < 1 || seconds > DISCOVER_MAX_SECONDS) {
-        proto_sendf("ERR,usage DISCOVER,<1-600>[,ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]");
+    if (seconds < 0 || seconds > DISCOVER_MAX_SECONDS) {
+        proto_sendf("ERR,usage DISCOVER,<0-600>[,ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]");
         return;
     }
     proto_sendf("OK,DISCOVER");

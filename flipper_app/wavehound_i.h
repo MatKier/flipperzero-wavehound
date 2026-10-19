@@ -12,7 +12,6 @@
 
 #include "scenes/wh_scene.h"
 #include "views/wh_hunt_view.h"
-#include "views/wh_progress_view.h"
 #include "views/wh_spectrum_view.h"
 #include "wh_uart.h"
 
@@ -27,7 +26,6 @@ typedef enum {
     WhViewByteInput,
     WhViewTextInput,
     WhViewWidget,
-    WhViewProgress,
     WhViewHunt,
     WhViewSpectrum,
 } WhViewId;
@@ -36,7 +34,6 @@ typedef enum {
     WhEventResultsReady = 100,
     WhEventMacEntered,
     WhEventChannelPicked,
-    WhEventFinishEarly,
     WhEventBoardInfoReady,
     WhEventSaveTarget,
     WhEventNameEntered,
@@ -85,7 +82,6 @@ typedef struct {
     ByteInput* byte_input;
     TextInput* text_input;
     Widget* widget;
-    WhProgressView* progress;
     WhHuntView* hunt;
     WhSpectrumView* spectrum;
 
@@ -102,7 +98,6 @@ typedef struct {
     volatile uint16_t progress_found;
 
     WhSearchKind search_kind;
-    uint16_t listen_seconds;
 
     /* Channel selection for device search / MAC hunt. */
     WhChannelPurpose channel_purpose;

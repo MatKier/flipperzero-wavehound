@@ -106,6 +106,10 @@ static uint32_t s_hunt_hop_periods;
 static TickType_t s_disc_start;
 static TickType_t s_disc_duration;
 static TickType_t s_disc_last_progress;
+static bool s_disc_continuous;     /* seconds == 0: stream devices until STOP */
+static uint16_t s_disc_cursor;     /* table slots already examined (continuous) */
+static uint16_t s_disc_streamed;   /* wanted DEV lines already sent (continuous) */
+static uint16_t s_disc_prev_count; /* table size seen at the previous tick */
 
 static uint32_t mac_hash(const uint8_t *mac)
 {
@@ -417,11 +421,29 @@ static void discover_start(uint16_t seconds, radio_discover_filter_t filter, uin
     s_disc_start = xTaskGetTickCount();
     s_disc_last_progress = s_disc_start;
     s_disc_duration = pdMS_TO_TICKS((uint32_t)seconds * 1000);
+    s_disc_continuous = seconds == 0; /* 0 = stream devices live until STOP */
+    s_disc_cursor = 0;
+    s_disc_streamed = 0;
+    s_disc_prev_count = 0;
     static const char *const names[] = {"ALL", "AP", "STA", "CLIENTS"};
     proto_sendf("DISCOVER_BEGIN,%u,%s,%u", seconds, names[filter], channel);
     led_set(40, 0, 60);
     set_channel(channel ? channel : 1);
     set_mode(MODE_DISCOVER);
+}
+
+static void discover_emit_one(const discover_dev_t *d)
+{
+    const uint8_t *m = d->mac;
+    char flags[3];
+    int f = 0;
+    flags[f++] = (d->flags & DEV_FLAG_AP) ? 'A' : 'S';
+    if (m[0] & 0x02) {
+        flags[f++] = 'R'; /* locally administered = randomized MAC */
+    }
+    flags[f] = '\0';
+    proto_sendf("DEV,%02x:%02x:%02x:%02x:%02x:%02x,%u,%d,%u,%s,%s", m[0], m[1], m[2], m[3], m[4],
+                m[5], d->channel, d->rssi_max, d->frames, flags, d->ssid);
 }
 
 static void discover_report(void)
@@ -446,17 +468,7 @@ static void discover_report(void)
 
     const uint16_t sent = total > DISCOVER_REPORT_MAX ? DISCOVER_REPORT_MAX : total;
     for (uint16_t i = 0; i < sent; i++) {
-        const discover_dev_t *d = &s_devs[order[i]];
-        const uint8_t *m = d->mac;
-        char flags[3];
-        int f = 0;
-        flags[f++] = (d->flags & DEV_FLAG_AP) ? 'A' : 'S';
-        if (m[0] & 0x02) {
-            flags[f++] = 'R'; /* locally administered = randomized MAC */
-        }
-        flags[f] = '\0';
-        proto_sendf("DEV,%02x:%02x:%02x:%02x:%02x:%02x,%u,%d,%u,%s,%s", m[0], m[1], m[2], m[3],
-                    m[4], m[5], d->channel, d->rssi_max, d->frames, flags, d->ssid);
+        discover_emit_one(&s_devs[order[i]]);
     }
     proto_sendf("DISCOVER_END,%u,%u", sent, total);
 }
@@ -469,12 +481,32 @@ static void discover_finish(void)
     led_set(0, 0, 8);
 }
 
+/* Continuous mode: emit DEV lines for wanted devices first seen a tick ago, so
+ * the promiscuous callback has had time to fill their flags/frames/ssid (the
+ * table is read lock-free, same as the timed report). Streams in discovery order
+ * and never reorders, so the Flipper's live list can append without reshuffling. */
+static void discover_stream(void)
+{
+    const uint16_t ready = s_disc_prev_count;
+    for (; s_disc_cursor < ready && s_disc_streamed < DISCOVER_REPORT_MAX; s_disc_cursor++) {
+        const discover_dev_t *d = &s_devs[s_disc_cursor];
+        if (discover_wanted(d)) {
+            discover_emit_one(d);
+            s_disc_streamed++;
+        }
+    }
+    s_disc_prev_count = s_dev_count;
+}
+
 static void discover_tick(void)
 {
     const TickType_t now = xTaskGetTickCount();
-    if (now - s_disc_start >= s_disc_duration) {
+    if (!s_disc_continuous && now - s_disc_start >= s_disc_duration) {
         discover_finish();
         return;
+    }
+    if (s_disc_continuous) {
+        discover_stream();
     }
     if (now - s_disc_last_progress >= pdMS_TO_TICKS(DISCOVER_PROGRESS_MS)) {
         s_disc_last_progress = now;
@@ -517,8 +549,10 @@ static void radio_task(void *arg)
                 discover_start(cmd.seconds, cmd.filter, cmd.channel, cmd.mac);
                 break;
             case CMD_FINISH:
-                /* Cut a listen short and report what was heard so far. */
-                if (s_mode == MODE_DISCOVER) {
+                /* Cut a timed listen short and report what was heard so far.
+                 * Continuous mode already streams live, so there is nothing to
+                 * flush: STOP ends it instead. */
+                if (s_mode == MODE_DISCOVER && !s_disc_continuous) {
                     discover_finish();
                 }
                 break;

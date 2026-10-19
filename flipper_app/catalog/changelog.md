@@ -1,3 +1,10 @@
+## v1.3
+
+- Continuous scanning: Hunt access point / Hunt devices now drop straight into a
+  live list that fills as transmitters are heard, instead of a fixed-length
+  listen. Pick a target the moment it appears, or keep waiting as long as you
+  like. "~ Search again" clears and restarts the scan.
+
 ## v1.2
 
 - Rename the "Search devices" menu entry to "Hunt devices" for consistency.

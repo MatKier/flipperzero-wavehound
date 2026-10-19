@@ -58,7 +58,7 @@ bool wh_scene_start_on_event(void* context, SceneManagerEvent event) {
     case StartItemHuntAp:
         app->search_kind = WhSearchAccessPoints;
         app->picking_ap_channel = false;
-        scene_manager_next_scene(app->scene_manager, WhSceneListenTime);
+        scene_manager_next_scene(app->scene_manager, WhSceneTargetList);
         return true;
     case StartItemSearchDevices:
         app->channel_purpose = WhChannelForDeviceSearch;

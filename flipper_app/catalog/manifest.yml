@@ -36,7 +36,8 @@ changelog: "@catalog/changelog.md"
 description: |
   WiFi fox hunting for the Flipper Zero WiFi dev board. Wavehound locates a
   2.4 GHz WiFi transmitter by its signal strength: pick an access point or
-  device heard during a short listen, or type a MAC by hand, then walk around
+  device from a live scan that fills as they are heard, or type a MAC by hand,
+  then walk around
   while the Flipper clicks faster, the meter fills and the board's RGB LED
   shifts from blue to red as the signal gets stronger.
 
@@ -49,7 +50,8 @@ description: |
 
   ## What it does
 
-  - **Hunt access point** - timed listen, then hunt the chosen AP by RSSI.
+  - **Hunt access point** - live scan that fills as networks appear, then hunt
+    the chosen AP by RSSI.
   - **Hunt devices** - find phones, laptops and IoT devices; scope to all
     channels, one channel, or the clients of a nearby AP.
   - **Enter MAC** - hunt any MAC directly, on auto-hop or a pinned channel.

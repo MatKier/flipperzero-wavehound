@@ -67,9 +67,15 @@ static void wh_results_reset(WavehoundApp* app) {
     furi_mutex_release(app->results_mutex);
 }
 
-/* Reserve the next result slot. Caller must release results_mutex. */
-static WhTarget* wh_results_append(WavehoundApp* app) {
+/* Find an existing result by MAC, or reserve a new slot for it. Returns NULL
+ * only when the table is full. Caller must release results_mutex. Continuous
+ * discovery may re-send a MAC, and the live list appends in discovery order, so
+ * matching keeps each device in its original slot instead of duplicating it. */
+static WhTarget* wh_results_slot(WavehoundApp* app, const char* mac) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+    for(size_t i = 0; i < app->result_count; i++) {
+        if(strcmp(app->results[i].mac, mac) == 0) return &app->results[i];
+    }
     if(app->result_count >= WH_MAX_RESULTS) return NULL;
     WhTarget* t = &app->results[app->result_count++];
     memset(t, 0, sizeof(WhTarget));
@@ -107,7 +113,7 @@ static void wh_on_line(char* line, void* context) {
         uint16_t frames = field_int(&cur);
         const char* flags = next_field(&cur);
         if(!mac || !flags) return;
-        WhTarget* t = wh_results_append(app);
+        WhTarget* t = wh_results_slot(app, mac);
         if(t) {
             strlcpy(t->mac, mac, sizeof(t->mac));
             strlcpy(t->name, cur ? cur : "", sizeof(t->name));
@@ -172,7 +178,6 @@ static WavehoundApp* wh_app_alloc(void) {
     memset(app, 0, sizeof(WavehoundApp));
     app->results_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     app->board_info = furi_string_alloc();
-    app->listen_seconds = 10;
 
     app->gui = furi_record_open(RECORD_GUI);
     app->view_dispatcher = view_dispatcher_alloc();
@@ -194,9 +199,6 @@ static WavehoundApp* wh_app_alloc(void) {
         app->view_dispatcher, WhViewTextInput, text_input_get_view(app->text_input));
     app->widget = widget_alloc();
     view_dispatcher_add_view(app->view_dispatcher, WhViewWidget, widget_get_view(app->widget));
-    app->progress = wh_progress_view_alloc();
-    view_dispatcher_add_view(
-        app->view_dispatcher, WhViewProgress, wh_progress_view_get_view(app->progress));
     app->hunt = wh_hunt_view_alloc();
     wh_hunt_view_set_save_callback(app->hunt, wh_hunt_save_cb, app);
     view_dispatcher_add_view(app->view_dispatcher, WhViewHunt, wh_hunt_view_get_view(app->hunt));
@@ -214,14 +216,12 @@ static void wh_app_free(WavehoundApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WhViewByteInput);
     view_dispatcher_remove_view(app->view_dispatcher, WhViewTextInput);
     view_dispatcher_remove_view(app->view_dispatcher, WhViewWidget);
-    view_dispatcher_remove_view(app->view_dispatcher, WhViewProgress);
     view_dispatcher_remove_view(app->view_dispatcher, WhViewHunt);
     view_dispatcher_remove_view(app->view_dispatcher, WhViewSpectrum);
     submenu_free(app->submenu);
     byte_input_free(app->byte_input);
     text_input_free(app->text_input);
     widget_free(app->widget);
-    wh_progress_view_free(app->progress);
     wh_hunt_view_free(app->hunt);
     wh_spectrum_view_free(app->spectrum);
 

@@ -4,7 +4,8 @@
 
 Wavehound uses the Flipper and its ESP32-S2 WiFi dev board to locate a 2.4 GHz
 WiFi transmitter by its signal strength. Pick an access point or other device
-heard during a short listen, or type in a MAC by hand, then walk around: the
+from a live scan that fills as they are heard, or type in a MAC by hand, then
+walk around: the
 Flipper clicks faster, the meter fills and the board's RGB LED shifts from blue
 to red as the signal gets stronger.
 
@@ -32,7 +33,7 @@ is why Wavehound ships custom firmware rather than building on it.
 ```
 ┌──────────── Flipper Zero ─────────────┐        ┌──── WiFi dev board (ESP32-S2) ─────┐
 │  Wavehound.fap                        │  UART  │  Wavehound firmware                │
-│   ├ Targets: AP search, device search,│ 115200 │   ├ timed listen, AP/STA filter    │
+│   ├ Targets: AP search, device search,│ 115200 │   ├ live scan, AP/STA filter       │
 │   │  manual MAC entry                 │◄──────►│   │  → target list                 │
 │   ├ Hunt view: dBm, meter, graph,     │  pins  │   ├ promiscuous RX → RSSI of target│
 │   │  Geiger clicks (speaker)          │ 13/14  │   ├ channel sweep → activity       │
@@ -45,8 +46,8 @@ is why Wavehound ships custom firmware rather than building on it.
 
 | Mode | What you see |
 |------|--------------|
-| **Hunt access point** | Pick how long to listen: 5, 10 or 30 seconds, or 1, 2 or 5 minutes. Press **OK** during the listen to stop early and jump straight to the results. The board listens on every channel and lists only access points, strongest first, by SSID (hidden networks show their BSSID). Pick one to open its details (vendor, type, signal), then hunt. |
-| **Hunt devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP listen so you can pick a network and then lists only the stations associated with it, on its channel. Then the same timed listen (5 s to 5 min, OK to stop early), with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
+| **Hunt access point** | The board listens on every channel and the list fills live, adding each access point as it is heard (by SSID; hidden networks show their BSSID). Pick one the moment it appears or keep waiting as long as you like — no duration to choose. New entries append to the bottom so your highlight stays put while you browse. Pick one to open its details (vendor, type, signal), then hunt. |
+| **Hunt devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP scan so you can pick a network and then lists only the stations associated with it, on its channel. The list then fills live, with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
 | **Enter MAC** | Type a MAC on the hex keypad (pre-filled with your last target), then pick the channel the same way: **Auto (hop until heard)**, a channel number, or a nearby AP's channel. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
 | **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel and signal. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution needs the `oui.db` database; without it, other MACs show "Unknown" (see [Vendor database](#vendor-database)). |
 | **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout, a COLD/COOL/WARM/HOT! label, a meter with peak marker and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels. After 8 s of silence it hops again to re-find the target. Press **Right** to save the current target as a named favorite. |
@@ -57,8 +58,7 @@ is why Wavehound ships custom firmware rather than building on it.
 Controls:
 
 - **Hunt:** OK = mute/unmute, Left = reset peak, Right = save target, Back = return to the list
-- **Searching:** OK = stop now and show the results, Back = cancel
-- **Target list:** the first entry, "~ Search again", reruns the same listen
+- **Target list (live scan):** scroll and pick any entry while scanning continues; the first entry, "~ Search again", clears the list and restarts the scan; Back stops scanning and returns
 - **Spectrum:** OK/Left/Right = change metric, Back = return to menu
 
 ## Layout
@@ -73,7 +73,7 @@ firmware/     ESP-IDF project for the ESP32-S2 on the WiFi dev board
 flipper_app/  Flipper external app (uFBT)
   wavehound.c             entry, board power/expansion handling, board line parser
   wh_uart.c               USART worker, line splitting, keep-alive ping
-  scenes/                 one file per screen (start, listen time, searching,
+  scenes/                 one file per screen (start, channel select,
                           target list, details, MAC input, hunt, spectrum,
                           board info, name input, saved MACs, saved entry,
                           edit saved, about)
@@ -253,6 +253,13 @@ any serial terminal. See [docs/PROTOCOL.md](docs/PROTOCOL.md). Example:
 < ...
 < DEV,3a:4f:12:ab:cd:ef,6,-58,12,SR,
 < DISCOVER_END,1,1
+> DISCOVER,0,AP          # 0 = scan continuously (what the app uses)
+< OK,DISCOVER
+< DISCOVER_BEGIN,0,AP,0
+< DEV,a4:2b:b0:11:22:33,6,-41,93,A,HomeNet   # streamed as each AP is heard
+< DP,1,1
+< ...                    # no DISCOVER_END; STOP ends it
+> STOP
 ```
 
 ## Disclaimer

@@ -15,7 +15,7 @@ static void wh_scene_channel_select_proceed(WavehoundApp* app) {
         /* A nearby AP was picked -> scope to its clients; a plain channel -> all
          * devices on it. */
         app->search_kind = app->device_search_clients ? WhSearchClients : WhSearchDevices;
-        scene_manager_next_scene(app->scene_manager, WhSceneListenTime);
+        scene_manager_next_scene(app->scene_manager, WhSceneTargetList);
     } else {
         scene_manager_next_scene(app->scene_manager, WhSceneHunt);
     }
@@ -72,7 +72,7 @@ bool wh_scene_channel_select_on_event(void* context, SceneManagerEvent event) {
     if(event.event == ITEM_FROM_AP) {
         app->picking_ap_channel = true;
         app->search_kind = WhSearchAccessPoints;
-        scene_manager_next_scene(app->scene_manager, WhSceneListenTime);
+        scene_manager_next_scene(app->scene_manager, WhSceneTargetList);
         return true;
     }
 
