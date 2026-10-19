@@ -8,8 +8,8 @@
 
 #define HISTORY_LEN 128
 #define LOST_AFTER_MS 2000
-#define RSSI_FLOOR (-95)
-#define RSSI_CEIL (-30)
+#define RSSI_FLOOR_DEFAULT (-95)
+#define RSSI_CEIL_DEFAULT (-30)
 
 #define GRAPH_TOP 44
 #define GRAPH_BOTTOM 63
@@ -29,6 +29,8 @@ typedef struct {
     int8_t history[HISTORY_LEN];
     uint8_t history_pos;
     bool sound;
+    int8_t rssi_floor; /* dBm where the meter reads empty */
+    int8_t rssi_ceil;  /* dBm where the meter reads full */
 } WhHuntModel;
 
 struct WhHuntView {
@@ -38,14 +40,17 @@ struct WhHuntView {
     volatile bool sound;
     volatile bool haptic; /* buzz the motor as a proximity cue */
     volatile float volume; /* click loudness, 0..1 */
+    volatile int8_t rssi_floor; /* meter/click range, mirrors the model */
+    volatile int8_t rssi_ceil;
     uint32_t last_heard_tick;
     WhHuntSaveCallback save_cb;
     void* save_ctx;
 };
 
-static float rssi_fraction(float rssi) {
+static float rssi_fraction(float rssi, int8_t floor, int8_t ceil) {
     if(rssi == 0) return 0;
-    float t = (rssi - RSSI_FLOOR) / (float)(RSSI_CEIL - RSSI_FLOOR);
+    if(ceil <= floor) return 0;
+    float t = (rssi - floor) / (float)(ceil - floor);
     if(t < 0) t = 0;
     if(t > 1) t = 1;
     return t;
@@ -106,10 +111,10 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
 
     /* Meter */
     canvas_draw_rframe(canvas, 0, 34, 128, 8, 2);
-    int fill = (int)(rssi_fraction(m->heard ? m->rssi : 0) * 124);
+    int fill = (int)(rssi_fraction(m->heard ? m->rssi : 0, m->rssi_floor, m->rssi_ceil) * 124);
     if(fill > 0) canvas_draw_box(canvas, 2, 36, fill, 4);
     if(m->peak) {
-        int px = 2 + (int)(rssi_fraction(m->peak) * 123);
+        int px = 2 + (int)(rssi_fraction(m->peak, m->rssi_floor, m->rssi_ceil) * 123);
         canvas_draw_line(canvas, px, 33, px, 42);
     }
 
@@ -118,7 +123,7 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
     for(int i = 0; i < HISTORY_LEN; i++) {
         int8_t s = m->history[(m->history_pos + i) % HISTORY_LEN];
         if(s == 0) continue;
-        int h = 1 + (int)(rssi_fraction(s) * graph_h);
+        int h = 1 + (int)(rssi_fraction(s, m->rssi_floor, m->rssi_ceil) * graph_h);
         canvas_draw_line(canvas, i, GRAPH_BOTTOM, i, GRAPH_BOTTOM - h + 1);
     }
     canvas_draw_dot(canvas, 0, GRAPH_TOP);
@@ -158,18 +163,18 @@ static bool wh_hunt_input(InputEvent* event, void* context) {
     return false;
 }
 
-static float geiger_rate(int8_t rssi) {
+static float geiger_rate(int8_t rssi, int8_t floor, int8_t ceil) {
     /* clicks per second: ~1 when barely audible, ~60 when on top of it */
     if(rssi == 0) return 0;
-    float t = rssi_fraction(rssi);
+    float t = rssi_fraction(rssi, floor, ceil);
     return 1.0f + t * t * 60.0f;
 }
 
 /* Gap between haptic pulses in ms: slow (~900 ms) when barely heard, tightening
  * to a near-continuous buzz (~80 ms) on top of the target. 0 = stay silent. */
-static uint32_t haptic_interval_ms(int8_t rssi) {
+static uint32_t haptic_interval_ms(int8_t rssi, int8_t floor, int8_t ceil) {
     if(rssi == 0) return 0;
-    float t = rssi_fraction(rssi);
+    float t = rssi_fraction(rssi, floor, ceil);
     return (uint32_t)(900.0f - t * 820.0f);
 }
 
@@ -199,7 +204,8 @@ static int32_t wh_geiger_thread(void* context) {
                 furi_hal_vibro_on(true);
                 vibro_on = true;
                 vibro_ticks = 2; /* ~20 ms pulse */
-                vibro_wait = haptic_interval_ms(hunt->geiger_rssi) / 10;
+                vibro_wait =
+                    haptic_interval_ms(hunt->geiger_rssi, hunt->rssi_floor, hunt->rssi_ceil) / 10;
             }
         } else if(vibro_on || vibro_ticks) {
             furi_hal_vibro_on(false);
@@ -223,7 +229,7 @@ static int32_t wh_geiger_thread(void* context) {
         }
 
         /* Poisson-ish clicks: probability per 10 ms tick = rate / 100 */
-        float rate = geiger_rate(hunt->geiger_rssi);
+        float rate = geiger_rate(hunt->geiger_rssi, hunt->rssi_floor, hunt->rssi_ceil);
         uint32_t threshold = (uint32_t)(rate * 100.0f);
         uint32_t rnd = furi_hal_random_get();
         if(threshold && (rnd % 10000) < threshold) {
@@ -261,6 +267,8 @@ WhHuntView* wh_hunt_view_alloc(void) {
     memset(hunt, 0, sizeof(WhHuntView));
     hunt->sound = true;
     hunt->volume = 0.5f;
+    hunt->rssi_floor = RSSI_FLOOR_DEFAULT;
+    hunt->rssi_ceil = RSSI_CEIL_DEFAULT;
     hunt->view = view_alloc();
     view_allocate_model(hunt->view, ViewModelTypeLocking, sizeof(WhHuntModel));
     view_set_context(hunt->view, hunt);
@@ -274,6 +282,8 @@ WhHuntView* wh_hunt_view_alloc(void) {
         {
             memset(m, 0, sizeof(WhHuntModel));
             m->sound = true;
+            m->rssi_floor = RSSI_FLOOR_DEFAULT;
+            m->rssi_ceil = RSSI_CEIL_DEFAULT;
         },
         false);
     return hunt;
@@ -308,6 +318,19 @@ void wh_hunt_view_set_haptic(WhHuntView* hunt, bool on) {
     hunt->haptic = on;
 }
 
+void wh_hunt_view_set_range(WhHuntView* hunt, int8_t floor, int8_t ceil) {
+    hunt->rssi_floor = floor;
+    hunt->rssi_ceil = ceil;
+    with_view_model(
+        hunt->view,
+        WhHuntModel * m,
+        {
+            m->rssi_floor = floor;
+            m->rssi_ceil = ceil;
+        },
+        true);
+}
+
 uint8_t wh_hunt_view_current_channel(WhHuntView* hunt) {
     uint8_t ch = 0;
     with_view_model(
@@ -323,8 +346,12 @@ void wh_hunt_view_set_target(WhHuntView* hunt, const char* name, uint8_t channel
         WhHuntModel * m,
         {
             bool sound = m->sound;
+            int8_t floor = m->rssi_floor;
+            int8_t ceil = m->rssi_ceil;
             memset(m, 0, sizeof(WhHuntModel));
             m->sound = sound;
+            m->rssi_floor = floor;
+            m->rssi_ceil = ceil;
             strlcpy(m->name, name, sizeof(m->name));
             m->channel = channel;
             m->locked = channel != 0;

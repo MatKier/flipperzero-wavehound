@@ -10,6 +10,7 @@
 static const char* const sound_names[] = {"On", "Muted"};
 static const char* const saved_hunt_names[] = {"Saved", "Auto-hop", "Nearby AP"};
 static const char* const off_on_names[] = {"Off", "On"};
+static const char* const range_names[] = {"Near", "Normal", "Far"};
 
 static void wh_settings_volume_text(VariableItem* item, uint8_t idx) {
     char buf[8];
@@ -36,6 +37,13 @@ static void saved_hunt_changed(VariableItem* item) {
     uint8_t idx = variable_item_get_current_value_index(item);
     app->settings.saved_hunt_mode = idx;
     variable_item_set_current_value_text(item, saved_hunt_names[idx]);
+}
+
+static void range_changed(VariableItem* item) {
+    WavehoundApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    app->settings.range_mode = idx;
+    variable_item_set_current_value_text(item, range_names[idx]);
 }
 
 static void haptic_changed(VariableItem* item) {
@@ -81,6 +89,13 @@ void wh_scene_settings_on_enter(void* context) {
     variable_item_set_current_value_index(item, hidx);
     variable_item_set_current_value_text(item, saved_hunt_names[hidx]);
 
+    /* Meter/click range preset (shifts the dBm window the meter spans) */
+    uint8_t ridx = app->settings.range_mode;
+    if(ridx >= WhRangeModeCount) ridx = WhRangeNormal;
+    item = variable_item_list_add(list, "Range", WhRangeModeCount, range_changed, app);
+    variable_item_set_current_value_index(item, ridx);
+    variable_item_set_current_value_text(item, range_names[ridx]);
+
     /* Haptic proximity cue (buzzes faster as the signal strengthens) */
     uint8_t vbidx = app->settings.haptic ? 1 : 0;
     item = variable_item_list_add(list, "Haptic", 2, haptic_changed, app);
@@ -109,5 +124,8 @@ void wh_scene_settings_on_exit(void* context) {
     wh_hunt_view_set_volume(app->hunt, app->settings.click_volume);
     wh_hunt_view_set_sound(app->hunt, !app->settings.mute_default);
     wh_hunt_view_set_haptic(app->hunt, app->settings.haptic);
+    int8_t range_floor, range_ceil;
+    wh_settings_range_bounds(app->settings.range_mode, &range_floor, &range_ceil);
+    wh_hunt_view_set_range(app->hunt, range_floor, range_ceil);
     variable_item_list_reset(app->var_item_list);
 }

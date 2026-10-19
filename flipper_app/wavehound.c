@@ -206,6 +206,9 @@ static WavehoundApp* wh_app_alloc(void) {
     wh_hunt_view_set_volume(app->hunt, app->settings.click_volume);
     wh_hunt_view_set_sound(app->hunt, !app->settings.mute_default);
     wh_hunt_view_set_haptic(app->hunt, app->settings.haptic);
+    int8_t range_floor, range_ceil;
+    wh_settings_range_bounds(app->settings.range_mode, &range_floor, &range_ceil);
+    wh_hunt_view_set_range(app->hunt, range_floor, range_ceil);
 
     return app;
 }

@@ -25,6 +25,25 @@ static void wh_settings_defaults(WhSettings* s) {
     s->saved_hunt_mode = WhSavedHuntSavedChannel;
     s->haptic = false;
     s->keep_backlight = true;
+    s->range_mode = WhRangeNormal;
+}
+
+void wh_settings_range_bounds(uint8_t mode, int8_t* floor, int8_t* ceil) {
+    switch(mode) {
+    case WhRangeNear:
+        *floor = -75;
+        *ceil = -25;
+        break;
+    case WhRangeFar:
+        *floor = -100;
+        *ceil = -50;
+        break;
+    case WhRangeNormal:
+    default:
+        *floor = -95;
+        *ceil = -30;
+        break;
+    }
 }
 
 static void apply_kv(WhSettings* s, const char* key, const char* value) {
@@ -43,6 +62,9 @@ static void apply_kv(WhSettings* s, const char* key, const char* value) {
         s->haptic = atoi(value) != 0;
     } else if(strcmp(key, "keep_backlight") == 0) {
         s->keep_backlight = atoi(value) != 0;
+    } else if(strcmp(key, "range") == 0) {
+        int m = atoi(value);
+        if(m >= 0 && m < WhRangeModeCount) s->range_mode = (uint8_t)m;
     }
 }
 
@@ -86,6 +108,7 @@ void wh_settings_save(WavehoundApp* app) {
         stream_write_format(stream, "saved_hunt=%u\n", s->saved_hunt_mode);
         stream_write_format(stream, "haptic=%u\n", s->haptic ? 1u : 0u);
         stream_write_format(stream, "keep_backlight=%u\n", s->keep_backlight ? 1u : 0u);
+        stream_write_format(stream, "range=%u\n", s->range_mode);
     }
 
     buffered_file_stream_close(stream);
