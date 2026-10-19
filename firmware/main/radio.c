@@ -39,6 +39,7 @@ typedef enum {
     CMD_HUNT,
     CMD_SPECTRUM,
     CMD_DISCOVER,
+    CMD_SLEEP,
 } radio_cmd_type_t;
 
 typedef struct {
@@ -470,6 +471,10 @@ static void radio_task(void *arg)
                 set_mode(MODE_IDLE);
                 led_set(0, 0, 8);
                 break;
+            case CMD_SLEEP:
+                set_mode(MODE_IDLE);
+                led_set(0, 0, 0);
+                break;
             case CMD_HUNT:
                 hunt_start(&cmd);
                 break;
@@ -557,5 +562,11 @@ void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8
 void radio_stop(void)
 {
     const radio_cmd_t cmd = {.type = CMD_STOP};
+    post(&cmd);
+}
+
+void radio_sleep(void)
+{
+    const radio_cmd_t cmd = {.type = CMD_SLEEP};
     post(&cmd);
 }

@@ -33,3 +33,6 @@ void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8
 
 /** Go idle. */
 void radio_stop(void);
+
+/** Go idle and turn the LED off (dark idle; the app sends this on exit). */
+void radio_sleep(void);

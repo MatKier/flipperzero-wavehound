@@ -139,6 +139,9 @@ static void handle_line(char *line)
     } else if (strcmp(line, "STOP") == 0) {
         radio_stop();
         proto_sendf("OK,STOP");
+    } else if (strcmp(line, "SLEEP") == 0) {
+        radio_sleep();
+        proto_sendf("OK,SLEEP");
     } else {
         proto_sendf("ERR,unknown %s", line);
     }

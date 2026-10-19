@@ -265,7 +265,9 @@ int32_t wavehound_app(void* p) {
     view_dispatcher_run(app->view_dispatcher);
 
     if(app->uart) {
-        wh_send(app, "STOP");
+        /* Leaving the app: park the board dark (STOP would leave the idle LED
+         * lit, and the board stays powered on the Flipper's always-on 3V3). */
+        wh_send(app, "SLEEP");
         wh_uart_free(app->uart);
     }
     if(app->otg_enabled_by_us) furi_hal_power_disable_otg();

@@ -14,7 +14,8 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `SPECTRUM`            | Sweep channels 1..N, report per-channel activity.              |
 | `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
-| `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. |
+| `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. The idle LED stays lit (blue). |
+| `SLEEP`               | Like `STOP`, but also turn the LED off (dark idle). The app sends this on exit, since the board stays powered on the Flipper's always-on 3V3 rail. |
 
 `<mac>` is `aa:bb:cc:dd:ee:ff` (case-insensitive).
 

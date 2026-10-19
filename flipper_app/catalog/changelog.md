@@ -1,3 +1,9 @@
+## v1.6
+
+- The dev board's LED now turns off when you leave the app, instead of staying
+  lit (the board keeps running on the Flipper's always-on 3V3 rail, so the app
+  now tells it to go dark on exit). Requires board firmware v5.
+
 ## v1.5
 
 - New Settings screen: adjust the Geiger click volume, choose whether sound
