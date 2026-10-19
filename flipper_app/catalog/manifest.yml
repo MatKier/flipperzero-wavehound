@@ -59,6 +59,8 @@ description: |
   - **Saved MACs** - keep favorites on the SD card and relaunch them.
   - **Channel spectrum** - per-channel activity bars for channels 1-13.
   - **Board info** - firmware, chip, radio and health readout.
+  - **Settings** - click volume, default sound, saved-hunt channel, meter
+    range (near/normal/far), haptic buzz and keep-backlight, saved on the SD card.
 
   Wavehound is **receive-only**: it reads frame headers to measure signal
   strength and never transmits. Only locate networks and devices you own or are

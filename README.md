@@ -50,10 +50,11 @@ is why Wavehound ships custom firmware rather than building on it.
 | **Hunt devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP scan so you can pick a network and then lists only the stations associated with it, on its channel. The list then fills live, with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
 | **Enter MAC** | Type a MAC on the hex keypad (pre-filled with your last target), then pick the channel the same way: **Auto (hop until heard)**, a channel number, or a nearby AP's channel. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
 | **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel and signal. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution needs the `oui.db` database; without it, other MACs show "Unknown" (see [Vendor database](#vendor-database)). |
-| **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout, a COLD/COOL/WARM/HOT! label, a meter with peak marker and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels. After 8 s of silence it hops again to re-find the target. Press **Right** to save the current target as a named favorite. |
+| **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout, a COLD/COOL/WARM/HOT! label, a meter with peak marker and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels. After 8 s of silence it hops again to re-find the target. Press **Right** to save the current target as a named favorite. An optional haptic buzz, a kept-on backlight and the meter's Near/Normal/Far range are all configurable under **Settings**. |
 | **Saved MACs** | Favorites you saved from the hunt screen, kept on the SD card (`/ext/apps_data/wavehound/saved.txt`). Pick one for **Hunt / Edit / Delete**. Hunt opens the channel picker with the saved channel pre-selected, so you can accept it, choose another, or switch to Auto. Edit fixes the name, MAC or channel (each field pre-filled). Delete removes it. Saving a randomized (`*`) MAC is of little use since it rotates. |
 | **Channel spectrum** | The board sweeps channels 1–13 (120 ms dwell each) in promiscuous mode. The Flipper draws one bar per channel with peak hold, a sweep cursor, the busiest channel, and the number of distinct transmitters heard per sweep. You can switch the metric between packets, max dBm and bytes. |
 | **Board info** | Ask the board about itself: firmware build (date + ELF hash), the ESP-IDF version actually running, chip model/revision/cores, radio features, factory MAC, flash size, the app partition and how much of it the current firmware uses, free/min heap, uptime, chip temperature and the last reset reason (handy for spotting brownouts from the 5 V boost). |
+| **Settings** | Tweak how the hunt behaves; kept on the SD card (`/ext/apps_data/wavehound/settings.txt`). **Click volume** (0.1–1.0) sets the Geiger click loudness. **Sound** (On/Muted) is the hunt screen's starting mute state. **Saved hunt ch** (Saved / Auto-hop / Nearby AP) is which channel option is pre-selected when you hunt a saved MAC. **Range** (Near / Normal / Far) shifts the dBm window the meter spans — Near −75..−25, Normal −95..−30, Far −100..−50 — and so retunes the click and haptic rate. **Haptic** (Off/On) buzzes the Flipper as a proximity cue, faster as the signal strengthens (works even when muted). **Keep backlight** (Off/On) holds the backlight on while a hunt is on screen. |
 
 Controls:
 
@@ -76,11 +77,11 @@ flipper_app/  Flipper external app (uFBT)
   scenes/                 one file per screen (start, channel select,
                           target list, details, MAC input, hunt, spectrum,
                           board info, name input, saved MACs, saved entry,
-                          edit saved, about)
+                          edit saved, settings, about)
   wh_store.c              saved MACs: load/add/update/delete on the SD card
+  wh_settings.c           app settings: load/save on the SD card
   wh_oui.c                vendor lookup from the SD oui.db
   views/wh_hunt_view.c    hunt screen + Geiger click thread
-  views/wh_progress_view.c search progress screen
   views/wh_spectrum_view.c spectrum screen
   assets/                 bundled file assets (oui.db, generated by build_app.py)
 tools/gen_oui.py  build oui.db (vendor database) from Wireshark's manuf
@@ -226,7 +227,8 @@ under **Apps → GPIO → ESP → Wavehound**. Built against official firmware S
 3. Pick a target: **Hunt access point**, **Hunt devices** or **Enter MAC**.
    Then start walking. Hold the Flipper away from your body and turn slowly.
    Your body blocks the signal, so the strongest reading points toward the
-   source.
+   source. **Settings** (also on the menu) tunes clicks, haptics, backlight
+   and the meter range.
 
 Hunting phones and other client devices works best while they are in use. An
 idle phone may only transmit every few seconds, so the readout updates in

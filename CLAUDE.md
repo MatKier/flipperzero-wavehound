@@ -37,6 +37,7 @@ flipper_app/
   wavehound_i.h           WavehoundApp struct, WhTarget/WhSavedMac, view & event enums
   wh_uart.c               USART worker, line splitting, keep-alive ping
   wh_store.c              saved MACs: load/add/update/delete on SD
+  wh_settings.c           app settings: load/save on SD (settings.txt)
   wh_oui.c                vendor lookup from SD oui.db (binary search, no RAM load)
   scenes/                 one file per screen (scene-manager pattern)
   views/                  custom views: hunt, spectrum

@@ -56,6 +56,12 @@ static const char* const about_text =
     "\e#Board info\n"
     "Firmware, chip and\n"
     "health of the dev board.\n\n"
+    "\e#Settings\n"
+    "Click volume, sound,\n"
+    "saved-hunt channel.\n"
+    "Range: Near/Normal/Far.\n"
+    "Haptic buzz and keep\n"
+    "backlight on.\n\n"
     "Receive-only. Only hunt\n"
     "devices you own or are\n"
     "allowed to locate.";
