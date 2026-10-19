@@ -1,7 +1,7 @@
 /*
  * Wavehound - WiFi fox hunting with the Flipper Zero WiFi dev board.
  *
- * Hunt an access point or any other device found during a timed listen, or a
+ * Hunt an access point or any other device found during a live scan, or a
  * MAC typed in by hand. The board reports the target's signal
  * strength; the Flipper turns it into a meter, a graph and Geiger clicks.
  */
