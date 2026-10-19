@@ -9,6 +9,7 @@
 
 static const char* const sound_names[] = {"On", "Muted"};
 static const char* const saved_hunt_names[] = {"Saved", "Auto-hop", "Nearby AP"};
+static const char* const off_on_names[] = {"Off", "On"};
 
 static void wh_settings_volume_text(VariableItem* item, uint8_t idx) {
     char buf[8];
@@ -35,6 +36,20 @@ static void saved_hunt_changed(VariableItem* item) {
     uint8_t idx = variable_item_get_current_value_index(item);
     app->settings.saved_hunt_mode = idx;
     variable_item_set_current_value_text(item, saved_hunt_names[idx]);
+}
+
+static void haptic_changed(VariableItem* item) {
+    WavehoundApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    app->settings.haptic = idx == 1;
+    variable_item_set_current_value_text(item, off_on_names[idx]);
+}
+
+static void keep_backlight_changed(VariableItem* item) {
+    WavehoundApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    app->settings.keep_backlight = idx == 1;
+    variable_item_set_current_value_text(item, off_on_names[idx]);
 }
 
 void wh_scene_settings_on_enter(void* context) {
@@ -66,6 +81,18 @@ void wh_scene_settings_on_enter(void* context) {
     variable_item_set_current_value_index(item, hidx);
     variable_item_set_current_value_text(item, saved_hunt_names[hidx]);
 
+    /* Haptic proximity cue (buzzes faster as the signal strengthens) */
+    uint8_t vbidx = app->settings.haptic ? 1 : 0;
+    item = variable_item_list_add(list, "Haptic", 2, haptic_changed, app);
+    variable_item_set_current_value_index(item, vbidx);
+    variable_item_set_current_value_text(item, off_on_names[vbidx]);
+
+    /* Hold the backlight on while hunting */
+    uint8_t blidx = app->settings.keep_backlight ? 1 : 0;
+    item = variable_item_list_add(list, "Keep backlight", 2, keep_backlight_changed, app);
+    variable_item_set_current_value_index(item, blidx);
+    variable_item_set_current_value_text(item, off_on_names[blidx]);
+
     view_dispatcher_switch_to_view(app->view_dispatcher, WhViewVarItemList);
 }
 
@@ -81,5 +108,6 @@ void wh_scene_settings_on_exit(void* context) {
     /* Apply straight away so the next hunt uses the new values. */
     wh_hunt_view_set_volume(app->hunt, app->settings.click_volume);
     wh_hunt_view_set_sound(app->hunt, !app->settings.mute_default);
+    wh_hunt_view_set_haptic(app->hunt, app->settings.haptic);
     variable_item_list_reset(app->var_item_list);
 }

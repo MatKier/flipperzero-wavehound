@@ -171,6 +171,7 @@ static WavehoundApp* wh_app_alloc(void) {
     app->board_info = furi_string_alloc();
 
     app->gui = furi_record_open(RECORD_GUI);
+    app->notifications = furi_record_open(RECORD_NOTIFICATION);
     app->view_dispatcher = view_dispatcher_alloc();
     app->scene_manager = scene_manager_alloc(&wh_scene_handlers, app);
     view_dispatcher_set_event_callback_context(app->view_dispatcher, app);
@@ -204,6 +205,7 @@ static WavehoundApp* wh_app_alloc(void) {
     wh_settings_load(app);
     wh_hunt_view_set_volume(app->hunt, app->settings.click_volume);
     wh_hunt_view_set_sound(app->hunt, !app->settings.mute_default);
+    wh_hunt_view_set_haptic(app->hunt, app->settings.haptic);
 
     return app;
 }
@@ -226,6 +228,7 @@ static void wh_app_free(WavehoundApp* app) {
 
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
+    furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_GUI);
     furi_mutex_free(app->results_mutex);
     furi_string_free(app->board_info);

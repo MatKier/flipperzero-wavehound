@@ -16,4 +16,6 @@ typedef struct {
     float click_volume;      /* geiger click loudness, 0.1..1.0 */
     bool mute_default;       /* hunt screen starts muted */
     uint8_t saved_hunt_mode; /* WhSavedHuntMode */
+    bool haptic;             /* buzz the motor as a proximity cue while hunting */
+    bool keep_backlight;     /* hold the backlight on during a hunt */
 } WhSettings;

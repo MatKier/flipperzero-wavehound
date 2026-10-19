@@ -6,6 +6,10 @@ void wh_scene_hunt_on_enter(void* context) {
 
     wh_hunt_view_set_target(app->hunt, t->name[0] ? t->name : t->mac, t->channel);
 
+    if(app->settings.keep_backlight) {
+        notification_message(app->notifications, &sequence_display_backlight_enforce_on);
+    }
+
     char cmd[48];
     snprintf(
         cmd,
@@ -37,4 +41,7 @@ bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
 void wh_scene_hunt_on_exit(void* context) {
     WavehoundApp* app = context;
     wh_send(app, "STOP");
+    if(app->settings.keep_backlight) {
+        notification_message(app->notifications, &sequence_display_backlight_enforce_auto);
+    }
 }

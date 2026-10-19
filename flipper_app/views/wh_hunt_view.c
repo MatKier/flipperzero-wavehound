@@ -36,6 +36,7 @@ struct WhHuntView {
     FuriThread* geiger;
     volatile int8_t geiger_rssi; /* 0 = silent */
     volatile bool sound;
+    volatile bool haptic; /* buzz the motor as a proximity cue */
     volatile float volume; /* click loudness, 0..1 */
     uint32_t last_heard_tick;
     WhHuntSaveCallback save_cb;
@@ -164,14 +165,48 @@ static float geiger_rate(int8_t rssi) {
     return 1.0f + t * t * 60.0f;
 }
 
+/* Gap between haptic pulses in ms: slow (~900 ms) when barely heard, tightening
+ * to a near-continuous buzz (~80 ms) on top of the target. 0 = stay silent. */
+static uint32_t haptic_interval_ms(int8_t rssi) {
+    if(rssi == 0) return 0;
+    float t = rssi_fraction(rssi);
+    return (uint32_t)(900.0f - t * 820.0f);
+}
+
 static int32_t wh_geiger_thread(void* context) {
     WhHuntView* hunt = context;
     bool have_speaker = false;
     uint8_t click_ticks = 0;
+    bool vibro_on = false;
+    uint8_t vibro_ticks = 0; /* remaining 10 ms ticks of the current pulse */
+    uint32_t vibro_wait = 0; /* 10 ms ticks until the next pulse */
 
     for(;;) {
         uint32_t ev = furi_thread_flags_wait(GeigerEvtStop, FuriFlagWaitAny, furi_ms_to_ticks(10));
         if(!(ev & FuriFlagError) && (ev & GeigerEvtStop)) break;
+
+        /* Haptic runs independently of sound, so handle it before the speaker
+         * block (which skips the rest of the loop while muted). */
+        if(hunt->haptic && hunt->geiger_rssi != 0) {
+            if(vibro_ticks) {
+                if(--vibro_ticks == 0) {
+                    furi_hal_vibro_on(false);
+                    vibro_on = false;
+                }
+            } else if(vibro_wait) {
+                vibro_wait--;
+            } else {
+                furi_hal_vibro_on(true);
+                vibro_on = true;
+                vibro_ticks = 2; /* ~20 ms pulse */
+                vibro_wait = haptic_interval_ms(hunt->geiger_rssi) / 10;
+            }
+        } else if(vibro_on || vibro_ticks) {
+            furi_hal_vibro_on(false);
+            vibro_on = false;
+            vibro_ticks = 0;
+            vibro_wait = 0;
+        }
 
         if(hunt->sound && !have_speaker) {
             have_speaker = furi_hal_speaker_acquire(30);
@@ -201,6 +236,7 @@ static int32_t wh_geiger_thread(void* context) {
         furi_hal_speaker_stop();
         furi_hal_speaker_release();
     }
+    if(vibro_on) furi_hal_vibro_on(false);
     return 0;
 }
 
@@ -266,6 +302,10 @@ void wh_hunt_view_set_volume(WhHuntView* hunt, float volume) {
 void wh_hunt_view_set_sound(WhHuntView* hunt, bool on) {
     hunt->sound = on;
     with_view_model(hunt->view, WhHuntModel * m, { m->sound = on; }, true);
+}
+
+void wh_hunt_view_set_haptic(WhHuntView* hunt, bool on) {
+    hunt->haptic = on;
 }
 
 uint8_t wh_hunt_view_current_channel(WhHuntView* hunt) {

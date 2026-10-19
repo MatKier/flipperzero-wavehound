@@ -10,6 +10,7 @@
 #include <gui/modules/widget.h>
 #include <gui/scene_manager.h>
 #include <gui/view_dispatcher.h>
+#include <notification/notification_messages.h>
 
 #include "scenes/wh_scene.h"
 #include "views/wh_hunt_view.h"
@@ -77,6 +78,7 @@ typedef struct {
 
 typedef struct {
     Gui* gui;
+    NotificationApp* notifications;
     ViewDispatcher* view_dispatcher;
     SceneManager* scene_manager;
 
