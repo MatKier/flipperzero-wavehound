@@ -12,6 +12,7 @@ typedef enum {
 } StartItem;
 
 static bool s_header_alive;
+static bool s_relit; /* relit the idle LED once the board came up this Start visit */
 
 static void wh_scene_start_update_header(WavehoundApp* app) {
     s_header_alive = app->board_alive;
@@ -30,6 +31,7 @@ static void wh_scene_start_callback(void* context, uint32_t index) {
 
 void wh_scene_start_on_enter(void* context) {
     WavehoundApp* app = context;
+    s_relit = false;
     Submenu* submenu = app->submenu;
     submenu_reset(submenu);
     submenu_add_item(submenu, "Hunt access point", StartItemHuntAp, wh_scene_start_callback, app);
@@ -51,6 +53,13 @@ bool wh_scene_start_on_event(void* context, SceneManagerEvent event) {
     WavehoundApp* app = context;
     if(event.type == SceneManagerEventTypeTick) {
         if(app->board_alive != s_header_alive) wh_scene_start_update_header(app);
+        /* The board idles dark after the SLEEP we send on exit, and the startup
+         * STOP can be lost before the link settles. Relight the idle LED once the
+         * board is confirmed alive (the menu is always a safe place to STOP). */
+        if(app->board_alive && !s_relit) {
+            wh_send(app, "STOP");
+            s_relit = true;
+        }
         return false;
     }
     if(event.type != SceneManagerEventTypeCustom) return false;
