@@ -1,3 +1,9 @@
+## v1.4
+
+- The live device list now shows an animated scan indicator: a blip sweeps back
+  and forth across the header while scanning, so it reads as active even before
+  any transmitter is found.
+
 ## v1.3
 
 - Continuous scanning: Hunt access point / Hunt devices now drop straight into a
