@@ -33,7 +33,7 @@ void wh_scene_start_on_enter(void* context) {
     submenu_reset(submenu);
     submenu_add_item(submenu, "Hunt access point", StartItemHuntAp, wh_scene_start_callback, app);
     submenu_add_item(
-        submenu, "Search devices", StartItemSearchDevices, wh_scene_start_callback, app);
+        submenu, "Hunt devices", StartItemSearchDevices, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Enter MAC", StartItemEnterMac, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Saved MACs", StartItemSaved, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Channel spectrum", StartItemSpectrum, wh_scene_start_callback, app);

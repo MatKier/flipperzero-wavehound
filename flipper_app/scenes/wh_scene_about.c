@@ -15,7 +15,7 @@ static const char* const about_text =
     "walk. Clicks speed up and\n"
     "the board LED turns red\n"
     "as you get closer.\n\n"
-    "\e#Search devices\n"
+    "\e#Hunt devices\n"
     "Pick all channels, one\n"
     "channel, or the channel\n"
     "of a nearby AP. Then\n"
