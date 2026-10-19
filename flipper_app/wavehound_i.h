@@ -53,7 +53,7 @@ typedef enum {
     WhChannelForMacHunt,
 } WhChannelPurpose;
 
-/** What the Searching scene listens for (all are timed passive listens). */
+/** What the live scan (TargetList) listens for. */
 typedef enum {
     WhSearchAccessPoints, /* access points only */
     WhSearchDevices,      /* every transmitter that is not an access point */
@@ -89,7 +89,7 @@ typedef struct {
     bool otg_enabled_by_us;
     bool board_alive;
 
-    /* Search results. Written by the UART worker between *_BEGIN and *_END. */
+    /* Live scan results, written by the UART worker as DEV lines stream in. */
     FuriMutex* results_mutex;
     WhTarget results[WH_MAX_RESULTS];
     size_t result_count;

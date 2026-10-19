@@ -246,7 +246,6 @@ any serial terminal. See [docs/PROTOCOL.md](docs/PROTOCOL.md). Example:
 < OK,DISCOVER
 < DISCOVER_BEGIN,AP,0
 < DEV,a4:2b:b0:11:22:33,6,-41,93,A,HomeNet   # streamed as each AP is heard
-< DP,1,1
 < ...                    # keeps streaming until you STOP
 > STOP
 < OK,STOP

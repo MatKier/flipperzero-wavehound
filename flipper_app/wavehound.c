@@ -137,8 +137,7 @@ static void wh_on_line(char* line, void* context) {
     } else if(strcmp(tag, "INFO_END") == 0) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WhEventBoardInfoReady);
     }
-    /* DP progress and READY / PONG / OK / ERR only refresh the liveness
-     * timestamp: the live list counts its own rows. */
+    /* READY / PONG / OK / ERR only refresh the liveness timestamp. */
 }
 
 /* Hunt view asks (Right key) to save the current target. */

@@ -19,7 +19,6 @@
 #define HUNT_HOP_PERIODS 3   /* dwell per channel while searching */
 #define SPECTRUM_DWELL_MS 120
 #define DISCOVER_DWELL_MS 120
-#define DISCOVER_PROGRESS_MS 1000
 #define DISCOVER_MAX 192
 #define DISCOVER_REPORT_MAX 96
 
@@ -101,8 +100,6 @@ static bool s_hunt_pinned;
 static uint8_t s_disc_channel; /* 0 = hop */
 static uint32_t s_hunt_quiet_periods;
 static uint32_t s_hunt_hop_periods;
-static TickType_t s_disc_start;
-static TickType_t s_disc_last_progress;
 static uint16_t s_disc_cursor;     /* table slots already examined */
 static uint16_t s_disc_streamed;   /* wanted DEV lines already sent */
 static uint16_t s_disc_prev_count; /* table size seen at the previous tick */
@@ -396,16 +393,6 @@ static bool discover_wanted(const discover_dev_t *d)
     }
 }
 
-static uint16_t discover_count_wanted(void)
-{
-    const uint16_t total = s_dev_count;
-    uint16_t n = 0;
-    for (uint16_t i = 0; i < total; i++) {
-        n += discover_wanted(&s_devs[i]);
-    }
-    return n;
-}
-
 static void discover_start(radio_discover_filter_t filter, uint8_t channel, const uint8_t *bssid)
 {
     set_mode(MODE_IDLE);
@@ -413,8 +400,6 @@ static void discover_start(radio_discover_filter_t filter, uint8_t channel, cons
     s_disc_filter = filter;
     s_disc_channel = channel;
     memcpy(s_disc_bssid, bssid ? bssid : (const uint8_t[6]){0}, 6);
-    s_disc_start = xTaskGetTickCount();
-    s_disc_last_progress = s_disc_start;
     s_disc_cursor = 0;
     s_disc_streamed = 0;
     s_disc_prev_count = 0;
@@ -458,13 +443,7 @@ static void discover_stream(void)
 
 static void discover_tick(void)
 {
-    const TickType_t now = xTaskGetTickCount();
     discover_stream();
-    if (now - s_disc_last_progress >= pdMS_TO_TICKS(DISCOVER_PROGRESS_MS)) {
-        s_disc_last_progress = now;
-        proto_sendf("DP,%lu,%u", (unsigned long)((now - s_disc_start) / configTICK_RATE_HZ),
-                    discover_count_wanted());
-    }
     if (s_disc_channel == 0) {
         set_channel(next_channel(s_channel));
     }

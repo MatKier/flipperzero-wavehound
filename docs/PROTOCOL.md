@@ -30,7 +30,6 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `S,<ch>,<frames>,<bytes>,<max_rssi>`           | Spectrum dwell result for one channel (120 ms dwell). |
 | `U,<unique>`                                   | End of a spectrum sweep: distinct transmitter MACs heard during it. |
 | `DISCOVER_BEGIN,<filter>,<ch>`                 | Search started (`ch` 0 = hopping).    |
-| `DP,<elapsed_s>,<count>`                       | Search progress, once per second. `count` only counts entries matching the filter. |
 | `DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid>` | One transmitter, streamed once in discovery order as it is first heard (max 96; the board tracks up to 192). `rssi` is the strongest frame heard. `flags`: `A` access point (sent beacons) or `S` station, plus `R` if the MAC is locally administered (randomized). `ssid` (rest of line) is only set for access points. For APs, `ch` comes from the beacon's DS parameter set. |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |

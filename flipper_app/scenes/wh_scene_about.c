@@ -1,7 +1,7 @@
 #include "../wavehound_i.h"
 
 static const char* const about_text =
-    "\e#Wavehound 1\n"
+    "\e#Wavehound\n"
     "WiFi fox hunting for the\n"
     "Flipper WiFi dev board\n"
     "running Wavehound fw.\n\n"
