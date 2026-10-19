@@ -1,7 +1,12 @@
 #include "../wavehound_i.h"
 
+/* Injected by fbt from fap_version in application.fam (e.g. "1.3"). */
+#ifndef FAP_VERSION
+#define FAP_VERSION "?"
+#endif
+
 static const char* const about_text =
-    "\e#Wavehound\n"
+    "\e#Wavehound " FAP_VERSION "\n"
     "WiFi fox hunting for the\n"
     "Flipper WiFi dev board\n"
     "running Wavehound fw.\n\n"
