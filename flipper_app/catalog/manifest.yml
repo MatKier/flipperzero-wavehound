@@ -1,0 +1,62 @@
+# Flipper Apps Catalog manifest for Wavehound.
+#
+# Shared fields (name, id, category, version, author, icon, short_description)
+# are read from application.fam and deliberately NOT duplicated here. Only the
+# catalog-specific fields live below.
+#
+# File paths (changelog, screenshots) are resolved relative to the sourcecode
+# subdir (flipper_app), NOT to this file's own location. This manifest and the
+# files it points at live in flipper_app/catalog/, so the paths carry a
+# catalog/ prefix.
+#
+# To submit: copy this file to the catalog repo at
+# applications/GPIO/wavehound/manifest.yml and open a PR (see README / the repo).
+# Set commit_sha below to the commit that contains the submitted code first.
+
+sourcecode:
+  type: git
+  location:
+    origin: https://github.com/MatKier/flipperzero-wavehound.git
+    commit_sha: TODO_SET_TO_SUBMITTED_COMMIT_SHA
+    subdir: flipper_app
+
+# Unmodified qFlipper screenshots. The first entry is used as the catalog
+# preview; reorder the list to change which shot is the preview.
+screenshots:
+  - catalog/screenshots/main_screen.png
+  - catalog/screenshots/networks.png
+  - catalog/screenshots/network_detail.png
+  - catalog/screenshots/hunting_ap.png
+  - catalog/screenshots/device_detail.png
+  - catalog/screenshots/hunting_device.png
+
+changelog: "@catalog/changelog.md"
+
+description: |
+  WiFi fox hunting for the Flipper Zero WiFi dev board. Wavehound locates a
+  2.4 GHz WiFi transmitter by its signal strength: pick an access point or
+  device heard during a short listen, or type a MAC by hand, then walk around
+  while the Flipper clicks faster, the meter fills and the board's RGB LED
+  shifts from blue to red as the signal gets stronger.
+
+  ## Requires the WiFi dev board
+
+  This app does nothing on its own. It is a thin UART client for the official
+  ESP32-S2 WiFi dev board, which must be flashed with the matching Wavehound
+  firmware (the real-time hunt loop runs on the board). Build and flashing
+  instructions are in the project repository.
+
+  ## What it does
+
+  - **Hunt access point** - timed listen, then hunt the chosen AP by RSSI.
+  - **Hunt devices** - find phones, laptops and IoT devices; scope to all
+    channels, one channel, or the clients of a nearby AP.
+  - **Enter MAC** - hunt any MAC directly, on auto-hop or a pinned channel.
+  - **Device details** - MAC vendor (OUI) lookup, type, channel and signal.
+  - **Saved MACs** - keep favorites on the SD card and relaunch them.
+  - **Channel spectrum** - per-channel activity bars for channels 1-13.
+  - **Board info** - firmware, chip, radio and health readout.
+
+  Wavehound is **receive-only**: it reads frame headers to measure signal
+  strength and never transmits. Only locate networks and devices you own or are
+  authorized to locate. Radio and privacy rules vary by jurisdiction.

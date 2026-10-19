@@ -8,6 +8,11 @@ heard during a short listen, or type in a MAC by hand, then walk around: the
 Flipper clicks faster, the meter fills and the board's RGB LED shifts from blue
 to red as the signal gets stronger.
 
+<p align="center">
+  <img src="flipper_app/catalog/screenshots/main_screen.png" alt="Wavehound main menu on the Flipper Zero" width="400">
+  <img src="flipper_app/catalog/screenshots/hunting_device.png" alt="Wavehound hunt screen showing signal strength" width="400">
+</p>
+
 Typical uses:
 
 - Find that forgotten access point, repeater or IoT plug hidden in a ceiling or closet.
@@ -41,7 +46,7 @@ is why Wavehound ships custom firmware rather than building on it.
 | Mode | What you see |
 |------|--------------|
 | **Hunt access point** | Pick how long to listen: 5, 10 or 30 seconds, or 1, 2 or 5 minutes. Press **OK** during the listen to stop early and jump straight to the results. The board listens on every channel and lists only access points, strongest first, by SSID (hidden networks show their BSSID). Pick one to open its details (vendor, type, signal), then hunt. |
-| **Search devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP listen so you can pick a network and then lists only the stations associated with it, on its channel. Then the same timed listen (5 s to 5 min, OK to stop early), with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
+| **Hunt devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP listen so you can pick a network and then lists only the stations associated with it, on its channel. Then the same timed listen (5 s to 5 min, OK to stop early), with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
 | **Enter MAC** | Type a MAC on the hex keypad (pre-filled with your last target), then pick the channel the same way: **Auto (hop until heard)**, a channel number, or a nearby AP's channel. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
 | **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel and signal. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution needs the `oui.db` database; without it, other MACs show "Unknown" (see [Vendor database](#vendor-database)). |
 | **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout, a COLD/COOL/WARM/HOT! label, a meter with peak marker and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels. After 8 s of silence it hops again to re-find the target. Press **Right** to save the current target as a named favorite. |
@@ -214,7 +219,7 @@ under **Apps → GPIO → ESP → Wavehound**. Built against official firmware S
 1. Plug the dev board onto the Flipper and open Wavehound. The app turns on
    5 V on the GPIO header and takes over the USART from the expansion service.
 2. The menu header changes to **"Wavehound - board OK"** once the board answers.
-3. Pick a target: **Hunt access point**, **Search devices** or **Enter MAC**.
+3. Pick a target: **Hunt access point**, **Hunt devices** or **Enter MAC**.
    Then start walking. Hold the Flipper away from your body and turn slowly.
    Your body blocks the signal, so the strongest reading points toward the
    source.
@@ -248,10 +253,13 @@ any serial terminal. See [docs/PROTOCOL.md](docs/PROTOCOL.md). Example:
 
 ## Disclaimer
 
-This is a hobby project, provided as-is and without any warranty. Flashing the
-dev board and running this firmware is at your own risk; I don't guarantee it
-won't damage, brick or otherwise break your hardware. You are responsible for
-anything that happens to your Flipper, dev board or other equipment.
+This is a hobby project, provided as-is and without any warranty. Everything
+here is developed and tested on my own original hardware — a genuine Flipper
+Zero and the official WiFi dev board. I can't vouch for clones, other hardware
+or other setups: flashing the dev board and running this firmware is at your
+own risk, and I don't guarantee it won't damage, brick or otherwise break your
+hardware. You are responsible for anything that happens to your Flipper, dev
+board or other equipment.
 
 This code is AI-assisted: much of it was written with the help of AI tools.
 Review it yourself before trusting it or flashing it to your hardware.

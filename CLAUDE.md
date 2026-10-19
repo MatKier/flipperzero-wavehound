@@ -97,3 +97,25 @@ and set a corresponding tag:
 Bump whichever side actually changed (app, firmware, or both). Use judgment:
 a user-visible or protocol-affecting change warrants a bump; a pure refactor or
 doc tweak usually does not.
+
+## Catalog metadata
+
+The [Flipper Apps Catalog](https://github.com/flipperdevices/flipper-application-catalog)
+submission files live in `flipper_app/catalog/`: `manifest.yml`, `changelog.md`
+and `screenshots/`.
+
+**Keep `manifest.yml` and `changelog.md` in sync** — with each other and with
+[flipper_app/application.fam](flipper_app/application.fam):
+
+- Every app version bump (`fap_version`) gets a new top entry in `changelog.md`
+  (newest first), and the catalog version is driven by `fap_version`.
+- `manifest.yml` leans on `application.fam` for the shared fields (name, id,
+  category, version, author, icon, short_description) — don't duplicate them.
+  If one of those changes in the `.fam`, there's nothing to change in the
+  manifest, but do check they still agree.
+- The manifest's `changelog` and `screenshots` paths must point at files that
+  exist, and `commit_sha` must be set to the submitted commit before a PR.
+
+Path gotcha: the catalog bundler resolves the manifest's `@file` and screenshot
+paths relative to `sourcecode.subdir` (`flipper_app`), **not** to the manifest's
+own folder — hence the `catalog/` prefix on those paths.
