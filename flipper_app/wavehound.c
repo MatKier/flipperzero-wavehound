@@ -231,6 +231,11 @@ static void wh_app_free(WavehoundApp* app) {
 
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
+    /* Guarantee the hunt screen's "Keep backlight" enforce can never outlive
+     * the app: scene_manager_free does not run the active scene's on_exit, so
+     * a quit straight from the hunt screen would otherwise leave the backlight
+     * forced on system-wide. Releasing here is a no-op if nothing enforced it. */
+    notification_message(app->notifications, &sequence_display_backlight_enforce_auto);
     furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_GUI);
     furi_mutex_free(app->results_mutex);

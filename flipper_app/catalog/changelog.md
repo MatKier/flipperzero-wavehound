@@ -1,3 +1,12 @@
+## v1.8
+
+- Fixed "Keep backlight" leaving the screen stuck on. The setting forces the
+  backlight on through a system-wide display state, which was only released when
+  the setting was still enabled on leaving the hunt — so turning it off, or
+  quitting the app straight from the hunt screen, left the backlight forced on
+  even outside Wavehound. The app now always releases that state when the hunt
+  ends and when it exits.
+
 ## v1.7
 
 - New Settings options for hunting. "Haptic" buzzes the Flipper's motor as a

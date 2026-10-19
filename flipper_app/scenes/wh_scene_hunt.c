@@ -41,7 +41,8 @@ bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
 void wh_scene_hunt_on_exit(void* context) {
     WavehoundApp* app = context;
     wh_send(app, "STOP");
-    if(app->settings.keep_backlight) {
-        notification_message(app->notifications, &sequence_display_backlight_enforce_auto);
-    }
+    /* Always release the enforce, regardless of the current setting: it is a
+     * global display state, so toggling "Keep backlight" off between enter and
+     * exit must not leave it stuck on. Harmless if it was never enforced. */
+    notification_message(app->notifications, &sequence_display_backlight_enforce_auto);
 }
