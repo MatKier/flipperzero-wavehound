@@ -196,8 +196,14 @@ static WavehoundApp* wh_app_alloc(void) {
     app->spectrum = wh_spectrum_view_alloc();
     view_dispatcher_add_view(
         app->view_dispatcher, WhViewSpectrum, wh_spectrum_view_get_view(app->spectrum));
+    app->var_item_list = variable_item_list_alloc();
+    view_dispatcher_add_view(
+        app->view_dispatcher, WhViewVarItemList, variable_item_list_get_view(app->var_item_list));
 
     wh_store_load(app);
+    wh_settings_load(app);
+    wh_hunt_view_set_volume(app->hunt, app->settings.click_volume);
+    wh_hunt_view_set_sound(app->hunt, !app->settings.mute_default);
 
     return app;
 }
@@ -209,10 +215,12 @@ static void wh_app_free(WavehoundApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WhViewWidget);
     view_dispatcher_remove_view(app->view_dispatcher, WhViewHunt);
     view_dispatcher_remove_view(app->view_dispatcher, WhViewSpectrum);
+    view_dispatcher_remove_view(app->view_dispatcher, WhViewVarItemList);
     submenu_free(app->submenu);
     byte_input_free(app->byte_input);
     text_input_free(app->text_input);
     widget_free(app->widget);
+    variable_item_list_free(app->var_item_list);
     wh_hunt_view_free(app->hunt);
     wh_spectrum_view_free(app->spectrum);
 

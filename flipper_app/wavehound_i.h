@@ -6,6 +6,7 @@
 #include <gui/modules/byte_input.h>
 #include <gui/modules/submenu.h>
 #include <gui/modules/text_input.h>
+#include <gui/modules/variable_item_list.h>
 #include <gui/modules/widget.h>
 #include <gui/scene_manager.h>
 #include <gui/view_dispatcher.h>
@@ -13,6 +14,7 @@
 #include "scenes/wh_scene.h"
 #include "views/wh_hunt_view.h"
 #include "views/wh_spectrum_view.h"
+#include "wh_settings.h"
 #include "wh_uart.h"
 
 #define WH_MAX_RESULTS 96
@@ -28,6 +30,7 @@ typedef enum {
     WhViewWidget,
     WhViewHunt,
     WhViewSpectrum,
+    WhViewVarItemList,
 } WhViewId;
 
 typedef enum {
@@ -81,8 +84,11 @@ typedef struct {
     ByteInput* byte_input;
     TextInput* text_input;
     Widget* widget;
+    VariableItemList* var_item_list;
     WhHuntView* hunt;
     WhSpectrumView* spectrum;
+
+    WhSettings settings;
 
     WhUart* uart;
     Expansion* expansion;
@@ -104,6 +110,7 @@ typedef struct {
 
     WhTarget target; /* what the Hunt scene follows */
     uint8_t mac_bytes[6]; /* ByteInput buffer, keeps the last entered MAC */
+    bool from_saved_hunt; /* hunt was launched from a saved MAC: apply saved_hunt_mode */
 
     /* The access point whose clients we are listing (WhSearchClients), chosen
      * via the device-search "Clients of nearby AP..." picker. */
@@ -133,3 +140,9 @@ void wh_send(WavehoundApp* app, const char* line);
 
 /** Parse "aa:bb:cc:dd:ee:ff" into bytes. Returns false on malformed input. */
 bool wh_parse_mac(const char* str, uint8_t mac[6]);
+
+/** Fill app->settings with defaults, then overlay any stored values. */
+void wh_settings_load(WavehoundApp* app);
+
+/** Persist app->settings to the SD card. */
+void wh_settings_save(WavehoundApp* app);

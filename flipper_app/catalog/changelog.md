@@ -1,3 +1,10 @@
+## v1.5
+
+- New Settings screen: adjust the Geiger click volume, choose whether sound
+  starts on or muted, and pick which channel option is pre-selected when hunting
+  a saved MAC (its saved channel, auto-hop, or a nearby AP). Settings persist on
+  the SD card.
+
 ## v1.4
 
 - The live device list now shows an animated scan indicator: a blip sweeps back

@@ -7,6 +7,7 @@ typedef enum {
     StartItemSaved,
     StartItemSpectrum,
     StartItemBoardInfo,
+    StartItemSettings,
     StartItemAbout,
 } StartItem;
 
@@ -38,6 +39,7 @@ void wh_scene_start_on_enter(void* context) {
     submenu_add_item(submenu, "Saved MACs", StartItemSaved, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Channel spectrum", StartItemSpectrum, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Board info", StartItemBoardInfo, wh_scene_start_callback, app);
+    submenu_add_item(submenu, "Settings", StartItemSettings, wh_scene_start_callback, app);
     submenu_add_item(submenu, "About / Help", StartItemAbout, wh_scene_start_callback, app);
     wh_scene_start_update_header(app);
     submenu_set_selected_item(
@@ -76,6 +78,9 @@ bool wh_scene_start_on_event(void* context, SceneManagerEvent event) {
         return true;
     case StartItemBoardInfo:
         scene_manager_next_scene(app->scene_manager, WhSceneBoardInfo);
+        return true;
+    case StartItemSettings:
+        scene_manager_next_scene(app->scene_manager, WhSceneSettings);
         return true;
     case StartItemAbout:
         scene_manager_next_scene(app->scene_manager, WhSceneAbout);

@@ -16,6 +16,12 @@ View* wh_hunt_view_get_view(WhHuntView* hunt);
 /** Register the callback fired when the user presses Right to save the target. */
 void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, void* context);
 
+/** Set the geiger click loudness (0..1). */
+void wh_hunt_view_set_volume(WhHuntView* hunt, float volume);
+
+/** Set whether sound is on (the hunt's default mute state). */
+void wh_hunt_view_set_sound(WhHuntView* hunt, bool on);
+
 /** Channel the hunt is currently locked on, or 0 if still hopping/seeking. */
 uint8_t wh_hunt_view_current_channel(WhHuntView* hunt);
 

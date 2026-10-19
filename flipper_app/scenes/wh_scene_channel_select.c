@@ -47,6 +47,21 @@ void wh_scene_channel_select_on_enter(void* context) {
     }
 
     uint32_t selected = device_search ? app->device_channel : app->target.channel;
+    if(app->from_saved_hunt && app->channel_purpose == WhChannelForMacHunt) {
+        /* Hunting a saved MAC: pre-select the option the settings choose. */
+        switch(app->settings.saved_hunt_mode) {
+        case WhSavedHuntAutoHop:
+            selected = ITEM_ALL_CHANNELS;
+            break;
+        case WhSavedHuntNearbyAp:
+            selected = ITEM_FROM_AP;
+            break;
+        default: /* WhSavedHuntSavedChannel */
+            selected = app->target.channel;
+            break;
+        }
+        app->from_saved_hunt = false;
+    }
     if(app->channel_pick_pending) {
         /* Back from the AP list with a channel: continue on the next loop turn. */
         selected = ITEM_FROM_AP;

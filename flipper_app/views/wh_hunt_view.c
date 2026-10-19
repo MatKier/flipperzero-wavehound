@@ -36,6 +36,7 @@ struct WhHuntView {
     FuriThread* geiger;
     volatile int8_t geiger_rssi; /* 0 = silent */
     volatile bool sound;
+    volatile float volume; /* click loudness, 0..1 */
     uint32_t last_heard_tick;
     WhHuntSaveCallback save_cb;
     void* save_ctx;
@@ -191,7 +192,7 @@ static int32_t wh_geiger_thread(void* context) {
         uint32_t threshold = (uint32_t)(rate * 100.0f);
         uint32_t rnd = furi_hal_random_get();
         if(threshold && (rnd % 10000) < threshold) {
-            furi_hal_speaker_start(900.0f + (float)((rnd >> 16) % 900), 1.0f);
+            furi_hal_speaker_start(900.0f + (float)((rnd >> 16) % 900), hunt->volume);
             click_ticks = 1;
         }
     }
@@ -223,6 +224,7 @@ WhHuntView* wh_hunt_view_alloc(void) {
     WhHuntView* hunt = malloc(sizeof(WhHuntView));
     memset(hunt, 0, sizeof(WhHuntView));
     hunt->sound = true;
+    hunt->volume = 0.5f;
     hunt->view = view_alloc();
     view_allocate_model(hunt->view, ViewModelTypeLocking, sizeof(WhHuntModel));
     view_set_context(hunt->view, hunt);
@@ -253,6 +255,17 @@ View* wh_hunt_view_get_view(WhHuntView* hunt) {
 void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, void* context) {
     hunt->save_cb = cb;
     hunt->save_ctx = context;
+}
+
+void wh_hunt_view_set_volume(WhHuntView* hunt, float volume) {
+    if(volume < 0) volume = 0;
+    if(volume > 1.0f) volume = 1.0f;
+    hunt->volume = volume;
+}
+
+void wh_hunt_view_set_sound(WhHuntView* hunt, bool on) {
+    hunt->sound = on;
+    with_view_model(hunt->view, WhHuntModel * m, { m->sound = on; }, true);
 }
 
 uint8_t wh_hunt_view_current_channel(WhHuntView* hunt) {
