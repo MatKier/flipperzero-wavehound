@@ -103,6 +103,10 @@ typedef struct {
     FuriMutex* results_mutex;
     WhTarget results[WH_MAX_RESULTS];
     size_t result_count;
+    /* Pending DISCOVER_BEGINs that resume a scan: each keeps the results instead
+     * of clearing them (re-sent MACs update in place, so rows stay matched to
+     * their slot). A count, so back-to-back resumes can't lose one. */
+    uint8_t results_keep_begins;
 
     WhSearchKind search_kind;
 

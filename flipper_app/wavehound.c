@@ -59,9 +59,14 @@ static int field_int(char** cursor) {
     return f ? atoi(f) : 0;
 }
 
-static void wh_results_reset(WavehoundApp* app) {
+/* A new discovery started: clear the results, unless the scan is a resume
+ * (returning from a result's Details), which keeps what was already found. */
+static void wh_results_begin(WavehoundApp* app) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
-    app->result_count = 0;
+    if(app->results_keep_begins)
+        app->results_keep_begins--;
+    else
+        app->result_count = 0;
     furi_mutex_release(app->results_mutex);
 }
 
@@ -103,7 +108,7 @@ static void wh_on_line(char* line, void* context) {
     } else if(strcmp(tag, "U") == 0) {
         wh_spectrum_view_push_unique(app->spectrum, field_int(&cur));
     } else if(strcmp(tag, "DISCOVER_BEGIN") == 0) {
-        wh_results_reset(app);
+        wh_results_begin(app);
     } else if(strcmp(tag, "DEV") == 0) {
         /* DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid...> */
         const char* mac = next_field(&cur);

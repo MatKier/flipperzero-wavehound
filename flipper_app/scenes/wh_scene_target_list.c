@@ -101,6 +101,7 @@ static size_t wh_scene_target_list_sync_rows(WavehoundApp* app) {
 static void wh_scene_target_list_restart(WavehoundApp* app) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
     app->result_count = 0;
+    app->results_keep_begins = 0;
     furi_mutex_release(app->results_mutex);
     s_shown = 0;
     s_header_count = 0;
@@ -125,7 +126,14 @@ static void wh_scene_target_list_resume(WavehoundApp* app) {
     wh_scene_target_list_set_header(app, count);
     s_header_count = count;
 
-    if(app->uart) wh_scene_target_list_send_discover(app);
+    if(app->uart) {
+        /* The board answers DISCOVER with DISCOVER_BEGIN, which would otherwise
+         * clear the results these rows were just built from. */
+        furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+        if(app->results_keep_begins < UINT8_MAX) app->results_keep_begins++;
+        furi_mutex_release(app->results_mutex);
+        wh_scene_target_list_send_discover(app);
+    }
 }
 
 void wh_scene_target_list_on_enter(void* context) {
