@@ -121,6 +121,18 @@ static void wh_on_line(char* line, void* context) {
             t->frames = frames;
             t->is_ap = strchr(flags, 'A') != NULL;
             t->randomized = strchr(flags, 'R') != NULL;
+            /* Security + PHY codes (APs only; absent from older firmware). */
+            const char* sec = strchr(flags, 'o') ? "Open" :
+                              strchr(flags, 'w') ? "WEP" :
+                              strchr(flags, '1') ? "WPA" :
+                              strchr(flags, '2') ? "WPA2" :
+                              strchr(flags, '3') ? "WPA3" : "";
+            strlcpy(t->security, sec, sizeof(t->security));
+            const char* phy = strchr(flags, 'n') ? "n" :
+                              strchr(flags, 'c') ? "ac" :
+                              strchr(flags, 'x') ? "ax" :
+                              strchr(flags, 'g') ? "g" : "";
+            strlcpy(t->phy, phy, sizeof(t->phy));
         }
         furi_mutex_release(app->results_mutex);
     } else if(strcmp(tag, "INFO_BEGIN") == 0) {

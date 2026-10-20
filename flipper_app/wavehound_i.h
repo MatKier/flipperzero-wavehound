@@ -68,6 +68,8 @@ typedef enum {
 typedef struct {
     char mac[18];    /* "aa:bb:cc:dd:ee:ff" */
     char name[33];   /* SSID for access points, empty if hidden/unknown */
+    char security[5]; /* "Open"/"WEP"/"WPA"/"WPA2"/"WPA3", empty if unknown */
+    char phy[3];     /* "g"/"n"/"ac"/"ax" (802.11 mode), empty if unknown */
     uint8_t channel; /* 0 = unknown, board hops */
     int8_t rssi;
     uint16_t frames;

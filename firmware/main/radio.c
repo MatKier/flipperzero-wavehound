@@ -53,12 +53,33 @@ typedef struct {
 #define DEV_FLAG_AP 0x01         /* transmitted like an access point */
 #define DEV_FLAG_DS_CHANNEL 0x02 /* channel taken from the beacon's DS parameter set */
 
+/* Security, from a beacon's RSN/WPA IEs and the Privacy capability bit. */
+typedef enum {
+    SEC_UNKNOWN = 0, /* not an AP, or no beacon parsed yet */
+    SEC_OPEN,
+    SEC_WEP,
+    SEC_WPA,
+    SEC_WPA2,
+    SEC_WPA3,
+} dev_security_t;
+
+/* Highest PHY a beacon advertises. 2.4 GHz only, so VHT is never seen here. */
+typedef enum {
+    PHY_UNKNOWN = 0,
+    PHY_LEGACY, /* 802.11b/g: no HT/VHT/HE element */
+    PHY_HT,     /* 802.11n */
+    PHY_VHT,    /* 802.11ac */
+    PHY_HE,     /* 802.11ax */
+} dev_phy_t;
+
 typedef struct {
     uint8_t mac[6];
     uint8_t channel;
     int8_t rssi_max;
     uint16_t frames;
     uint8_t flags;
+    uint8_t security; /* dev_security_t, set from beacons */
+    uint8_t phy;      /* dev_phy_t, set from beacons */
     char ssid[33];
 } discover_dev_t;
 
@@ -135,6 +156,34 @@ static void unique_insert(const uint8_t *mac)
     }
     s_unique_table[slot] = h;
     s_unique_count++;
+}
+
+/* Scan an RSN element's AKM suite list for an AKM that marks WPA3: SAE (8),
+ * FT-SAE (9), OWE (18) or Suite-B (11, 12). Layout: version(2), group cipher(4),
+ * pairwise count(2) + pairwise suites(4*n), AKM count(2) + AKM suites(4*m). Each
+ * suite is a 3-byte OUI (00-0F-AC for 802.11) plus a 1-byte selector. */
+static bool rsn_is_wpa3(const uint8_t *ie, uint8_t len)
+{
+    uint16_t pos = 2 + 4; /* version + group cipher suite */
+    if (pos + 2 > len) {
+        return false;
+    }
+    uint16_t pairwise = ie[pos] | (ie[pos + 1] << 8);
+    pos += 2 + 4 * pairwise;
+    if (pos + 2 > len) {
+        return false;
+    }
+    uint16_t akm = ie[pos] | (ie[pos + 1] << 8);
+    pos += 2;
+    for (uint16_t i = 0; i < akm && pos + 4 <= len; i++, pos += 4) {
+        if (ie[pos] == 0x00 && ie[pos + 1] == 0x0f && ie[pos + 2] == 0xac) {
+            const uint8_t sel = ie[pos + 3];
+            if (sel == 8 || sel == 9 || sel == 11 || sel == 12 || sel == 18) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /* SSIDs are raw bytes; keep the line protocol intact. */
@@ -217,23 +266,45 @@ static void discover_frame(const uint8_t *hdr, uint16_t len, int8_t rssi, uint8_
 
     if (is_beacon) {
         const uint16_t end = len > 4 ? len - 4 : 0; /* strip FCS */
-        uint16_t pos = 24 + 12;                     /* header + fixed fields */
+        /* Capability info sits in the fixed fields at offset 34; bit 4 = Privacy. */
+        const bool privacy = end >= 36 && (hdr[34] & 0x10);
+        bool rsn = false, wpa3 = false, wpa1 = false;
+        bool ht = false, vht = false, he = false;
+        uint16_t pos = 24 + 12; /* header + fixed fields */
         while (pos + 2 <= end) {
             const uint8_t tag = hdr[pos];
             const uint8_t tag_len = hdr[pos + 1];
             if (pos + 2 + tag_len > end) {
                 break;
             }
-            if (tag == 0 && !dev->ssid[0] && tag_len && hdr[pos + 2] != 0) {
+            const uint8_t *ie = hdr + pos + 2;
+            if (tag == 0 && !dev->ssid[0] && tag_len && ie[0] != 0) {
                 /* Hidden networks send an empty or zero-filled SSID. */
-                copy_ssid(dev->ssid, hdr + pos + 2, tag_len);
-            } else if (tag == 3 && tag_len == 1 && hdr[pos + 2] >= 1 &&
-                       hdr[pos + 2] <= MAX_CHANNEL) {
-                dev->channel = hdr[pos + 2]; /* DS parameter set: the AP's real channel */
+                copy_ssid(dev->ssid, ie, tag_len);
+            } else if (tag == 3 && tag_len == 1 && ie[0] >= 1 && ie[0] <= MAX_CHANNEL) {
+                dev->channel = ie[0]; /* DS parameter set: the AP's real channel */
                 dev->flags |= DEV_FLAG_DS_CHANNEL;
+            } else if (tag == 48) {
+                rsn = true; /* RSN element: WPA2, or WPA3 if an SAE/OWE AKM is listed */
+                wpa3 = rsn_is_wpa3(ie, tag_len);
+            } else if (tag == 221 && tag_len >= 4 && ie[0] == 0x00 && ie[1] == 0x50 &&
+                       ie[2] == 0xf2 && ie[3] == 0x01) {
+                wpa1 = true; /* Microsoft WPA v1 vendor element */
+            } else if (tag == 45) {
+                ht = true; /* HT Capabilities -> 802.11n */
+            } else if (tag == 191) {
+                vht = true; /* VHT Capabilities -> 802.11ac */
+            } else if (tag == 255 && tag_len >= 1 && ie[0] == 35) {
+                he = true; /* HE Capabilities extension element -> 802.11ax */
             }
             pos += 2 + tag_len;
         }
+
+        dev->security = rsn      ? (wpa3 ? SEC_WPA3 : SEC_WPA2)
+                        : wpa1    ? SEC_WPA
+                        : privacy ? SEC_WEP
+                                  : SEC_OPEN;
+        dev->phy = he ? PHY_HE : vht ? PHY_VHT : ht ? PHY_HT : PHY_LEGACY;
     }
 }
 
@@ -418,11 +489,29 @@ static void discover_start(radio_discover_filter_t filter, uint8_t channel, cons
 static void discover_emit_one(const discover_dev_t *d)
 {
     const uint8_t *m = d->mac;
-    char flags[3];
+    /* A/S, optional R, then (APs with a parsed beacon) one security and one PHY
+     * code. Older firmware omits the trailing codes; readers must not assume
+     * fixed positions beyond A/S/R. */
+    char flags[6];
     int f = 0;
     flags[f++] = (d->flags & DEV_FLAG_AP) ? 'A' : 'S';
     if (m[0] & 0x02) {
         flags[f++] = 'R'; /* locally administered = randomized MAC */
+    }
+    switch (d->security) {
+    case SEC_OPEN: flags[f++] = 'o'; break;
+    case SEC_WEP:  flags[f++] = 'w'; break;
+    case SEC_WPA:  flags[f++] = '1'; break;
+    case SEC_WPA2: flags[f++] = '2'; break;
+    case SEC_WPA3: flags[f++] = '3'; break;
+    default: break; /* SEC_UNKNOWN: no code */
+    }
+    switch (d->phy) {
+    case PHY_LEGACY: flags[f++] = 'g'; break;
+    case PHY_HT:     flags[f++] = 'n'; break;
+    case PHY_VHT:    flags[f++] = 'c'; break;
+    case PHY_HE:     flags[f++] = 'x'; break;
+    default: break; /* PHY_UNKNOWN: no code */
     }
     flags[f] = '\0';
     proto_sendf("DEV,%02x:%02x:%02x:%02x:%02x:%02x,%u,%d,%u,%s,%s", m[0], m[1], m[2], m[3], m[4],

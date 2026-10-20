@@ -31,13 +31,13 @@ void wh_scene_details_on_enter(void* context) {
     snprintf(line, sizeof(line), "Vendor: %s", vendor);
     widget_add_string_element(w, 0, 35, AlignLeft, AlignBottom, FontSecondary, line);
 
-    if(t->channel) {
-        snprintf(
-            line, sizeof(line), "%s  ch%u  %ddBm", t->is_ap ? "AP" : "Station", t->channel,
-            t->rssi);
-    } else {
-        snprintf(line, sizeof(line), "%s  %ddBm", t->is_ap ? "AP" : "Station", t->rssi);
-    }
+    /* "<AP|Station>[ chN][ <security>][ <phy>] <rssi>dBm". Security and PHY are
+     * only known for access points whose beacon was parsed. */
+    size_t n = snprintf(line, sizeof(line), "%s", t->is_ap ? "AP" : "Station");
+    if(t->channel) n += snprintf(line + n, sizeof(line) - n, " ch%u", t->channel);
+    if(t->security[0]) n += snprintf(line + n, sizeof(line) - n, " %s", t->security);
+    if(t->phy[0]) n += snprintf(line + n, sizeof(line) - n, " %s", t->phy);
+    snprintf(line + n, sizeof(line) - n, " %ddBm", t->rssi);
     widget_add_string_element(w, 0, 47, AlignLeft, AlignBottom, FontSecondary, line);
 
     widget_add_button_element(w, GuiButtonTypeLeft, "Save", wh_scene_details_button_cb, app);
