@@ -13,7 +13,7 @@ Two independent programs talk over UART:
 
 - **`firmware/`** — ESP-IDF project for the ESP32-S2 on the dev board. Runs the
   real-time hunt/discover/spectrum state machine. C, ESP-IDF 5.x/6.x, built with
-  PlatformIO or `idf.py`, target `esp32s2`.
+  PlatformIO, target `esp32s2`.
 - **`flipper_app/`** — the Flipper external app (`.fap`), a thin UART client that
   renders what the board reports. C, Flipper firmware SDK (API 88.2, FW 1.5.1),
   built with `ufbt`.

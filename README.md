@@ -100,19 +100,10 @@ it stays fast and never loads into RAM.
   <img src="flipper_app/catalog/screenshots/device_detail.png" alt="Wavehound device details screen showing the resolved vendor" width="400">
 </p>
 
-Build the app with the database bundled in:
-
-```
-python3 build_app.py                        # download manuf, build oui.db, run ufbt
-python3 build_app.py --manuf path/to/manuf  # use a local manuf file instead
-python3 build_app.py --no-build             # only (re)generate the db
-python3 build_app.py --launch               # build, then upload + run on the Flipper
-```
-
-`build_app.py` writes the db to `flipper_app/assets/oui.db`, which the manifest
-bundles (`fap_file_assets`) so the Flipper unpacks it to
-`/ext/apps_assets/wavehound/oui.db` on install. (`tools/gen_oui.py` is the
-underlying generator if you want to run it directly.)
+`oui.db` is not checked in: `build_app.py` generates it into
+`flipper_app/assets/oui.db` (see [step 2](#2-build-and-install-the-flipper-app)).
+The manifest bundles that folder (`fap_file_assets`), so the Flipper unpacks it
+to `/ext/apps_assets/wavehound/oui.db` when the app is installed.
 
 The app looks for the database in two places, in order:
 
@@ -127,11 +118,9 @@ registry); redistribute per its terms with attribution.
 
 ## 1. Flash the dev board firmware
 
-You can build with **PlatformIO** (simplest: one global install that pulls its
-own ESP-IDF toolchain) or with a full **ESP-IDF** install. PlatformIO is shown
-first and recommended; verified building with PlatformIO + ESP-IDF 6.1.
-
-### Option A: PlatformIO (recommended)
+The firmware is built with **PlatformIO**, which pulls its own ESP-IDF
+toolchain, so you don't need a separate ESP-IDF install. Verified building with
+PlatformIO + ESP-IDF 6.1.
 
 Install PlatformIO Core once with [pipx](https://pipx.pypa.io/) (e.g.
 `apt install pipx` or `brew install pipx`, then `pipx ensurepath`):
@@ -189,21 +178,6 @@ cd firmware
 pio run -t menuconfig
 ```
 
-### Option B: ESP-IDF
-
-With a full ESP-IDF 5.x/6.x install, from its `idf.py`/export shell and after
-the same BOOT+RESET download-mode step:
-
-```bash
-cd firmware
-idf.py set-target esp32s2
-idf.py build
-idf.py -p COM5 flash        # use your port
-idf.py menuconfig           # pins, baud, LED, max channel -> Wavehound
-```
-
----
-
 Tap **RESET** after flashing to boot the new firmware.
 
 > The defaults assume the official board: UART0 on GPIO43/44 to Flipper
@@ -212,14 +186,29 @@ Tap **RESET** after flashing to boot the new firmware.
 
 ## 2. Build and install the Flipper app
 
+From the repo root, `build_app.py` downloads Wireshark's `manuf`, generates the
+vendor database and then runs `ufbt` for you:
+
 ```bash
 pipx install ufbt   # or: pip install ufbt inside a venv
-cd flipper_app
-ufbt            # build -> dist/wavehound.fap
-ufbt launch     # build, upload over USB and run
+python3 build_app.py            # build -> flipper_app/dist/wavehound.fap
+python3 build_app.py --launch   # build, upload over USB and run
 ```
 
-Or copy `dist/wavehound.fap` to `SD:/apps/GPIO/ESP/` with qFlipper. The app shows up
+Other options:
+
+```bash
+python3 build_app.py --manuf path/to/manuf  # use a local manuf file instead
+python3 build_app.py --no-build             # only (re)generate the db
+python3 build_app.py --skip-db              # just build (keep the existing oui.db)
+```
+
+(`tools/gen_oui.py` is the underlying generator if you want to run it directly.)
+Running `ufbt` in `flipper_app/` directly also works and reuses an `oui.db`
+generated earlier; on a fresh clone the app is then built without one and shows
+vendors as "Unknown".
+
+Or copy `flipper_app/dist/wavehound.fap` to `SD:/apps/GPIO/ESP/` with qFlipper. The app shows up
 under **Apps → GPIO → ESP → Wavehound**. Built against official firmware SDK 1.5.1
 (API 88.2).
 
