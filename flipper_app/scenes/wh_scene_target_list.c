@@ -5,11 +5,18 @@
 #define ITEM_SEARCH_AGAIN 0
 /* Result i is submenu index i + 1. */
 
+/* Scene state: FRESH clears the list and starts a new scan on enter; RESUME
+ * keeps the results already found (set when drilling into a result's Details,
+ * so returning does not throw them away). "Search again" always starts fresh. */
+#define TARGET_LIST_FRESH 0
+#define TARGET_LIST_RESUME 1
+
 /* Rows already added to the submenu, so a tick only appends the newcomers and
  * never touches existing rows (the submenu keeps the user's highlight put). */
 static size_t s_shown;
 static size_t s_header_count; /* count last written to the header */
 static uint8_t s_spin; /* animated scan indicator phase */
+static uint32_t s_picked_item; /* submenu index of the last picked result */
 
 static void wh_scene_target_list_callback(void* context, uint32_t index) {
     WavehoundApp* app = context;
@@ -76,6 +83,20 @@ static void wh_scene_target_list_set_header(WavehoundApp* app, size_t count) {
     submenu_set_header(app->submenu, header);
 }
 
+/* Append submenu rows for results heard since s_shown; returns the live count.
+ * Never rebuilds existing rows, so the user's highlight stays where it is. */
+static size_t wh_scene_target_list_sync_rows(WavehoundApp* app) {
+    char label[64];
+    furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+    const size_t count = app->result_count;
+    for(; s_shown < count; s_shown++) {
+        format_label(&app->results[s_shown], label, sizeof(label));
+        submenu_add_item(app->submenu, label, s_shown + 1, wh_scene_target_list_callback, app);
+    }
+    furi_mutex_release(app->results_mutex);
+    return count;
+}
+
 /* Clear the list and (re)start a continuous scan. */
 static void wh_scene_target_list_restart(WavehoundApp* app) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
@@ -92,10 +113,35 @@ static void wh_scene_target_list_restart(WavehoundApp* app) {
     if(app->uart) wh_scene_target_list_send_discover(app);
 }
 
+/* Re-enter after drilling into a result: keep every row found so far and just
+ * rebuild the submenu that on_exit tore down, then resume the board scan. */
+static void wh_scene_target_list_resume(WavehoundApp* app) {
+    s_shown = 0;
+    submenu_reset(app->submenu);
+    submenu_add_item(
+        app->submenu, "~ Search again", ITEM_SEARCH_AGAIN, wh_scene_target_list_callback, app);
+
+    const size_t count = wh_scene_target_list_sync_rows(app);
+    wh_scene_target_list_set_header(app, count);
+    s_header_count = count;
+
+    if(app->uart) wh_scene_target_list_send_discover(app);
+}
+
 void wh_scene_target_list_on_enter(void* context) {
     WavehoundApp* app = context;
-    wh_scene_target_list_restart(app);
-    submenu_set_selected_item(app->submenu, ITEM_SEARCH_AGAIN);
+    const bool resume =
+        scene_manager_get_scene_state(app->scene_manager, WhSceneTargetList) ==
+        TARGET_LIST_RESUME;
+    if(resume) {
+        wh_scene_target_list_resume(app);
+        submenu_set_selected_item(app->submenu, s_picked_item);
+    } else {
+        wh_scene_target_list_restart(app);
+        submenu_set_selected_item(app->submenu, ITEM_SEARCH_AGAIN);
+    }
+    /* The next entry is fresh unless a pick arms RESUME again. */
+    scene_manager_set_scene_state(app->scene_manager, WhSceneTargetList, TARGET_LIST_FRESH);
     view_dispatcher_switch_to_view(app->view_dispatcher, WhViewSubmenu);
 }
 
@@ -105,15 +151,7 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     if(event.type == SceneManagerEventTypeTick) {
         /* Append devices heard since the last tick; never rebuild, so the
          * highlight stays where the user left it. */
-        char label[64];
-        furi_mutex_acquire(app->results_mutex, FuriWaitForever);
-        const size_t count = app->result_count;
-        for(; s_shown < count; s_shown++) {
-            format_label(&app->results[s_shown], label, sizeof(label));
-            submenu_add_item(
-                app->submenu, label, s_shown + 1, wh_scene_target_list_callback, app);
-        }
-        furi_mutex_release(app->results_mutex);
+        const size_t count = wh_scene_target_list_sync_rows(app);
         /* While a live scan is on, refresh every tick so the sweep animates;
          * otherwise only rewrite the header when the count actually changes. */
         if(app->uart && !app->picking_ap_channel) {
@@ -167,6 +205,11 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     app->target.pin_channel =
         (app->search_kind == WhSearchDevices && app->device_channel != 0) ||
         app->search_kind == WhSearchClients;
+
+    /* Keep the found list when we come back from Details, and land back on the
+     * row just picked. */
+    s_picked_item = event.event;
+    scene_manager_set_scene_state(app->scene_manager, WhSceneTargetList, TARGET_LIST_RESUME);
 
     /* Pre-fill manual entry with the last target. */
     wh_parse_mac(app->target.mac, app->mac_bytes);

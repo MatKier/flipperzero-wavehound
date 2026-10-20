@@ -1,3 +1,10 @@
+## v1.11
+
+- Picking a result from a scan and then pressing Back now keeps the devices
+  already found and resumes scanning, landing you back on the row you came from,
+  instead of clearing the list and starting over. Use "Search again" to clear
+  and restart from scratch.
+
 ## v1.10
 
 - The device details screen (shown when you pick a scanned result) now reports
