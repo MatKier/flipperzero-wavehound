@@ -423,9 +423,18 @@ void wh_hunt_view_push_sample(
             if(frames) {
                 m->frames_total += frames;
                 m->rssi = (m->rssi == 0) ? avg : (m->rssi * 0.6f + avg * 0.4f);
-                m->rssi_slow = (m->rssi_slow == 0) ? avg : (m->rssi_slow * 0.85f + avg * 0.15f);
+                m->rssi_slow = (m->rssi_slow == 0) ? avg : (m->rssi_slow * 0.96f + avg * 0.04f);
                 float d = m->rssi - m->rssi_slow;
-                m->trend = d > 1.5f ? 1 : (d < -1.5f ? -1 : 0);
+                /* Hysteresis so the arrow sticks instead of flickering: commit to a
+                 * direction at +/-2 dB, and only clear it once the signal is
+                 * genuinely flat (< 0.7 dB). The dead-band in between holds the
+                 * last direction. */
+                if(d > 2.0f)
+                    m->trend = 1;
+                else if(d < -2.0f)
+                    m->trend = -1;
+                else if(d > -0.7f && d < 0.7f)
+                    m->trend = 0;
                 m->fps = (m->fps == 0) ? frames * 10.0f : (m->fps * 0.7f + frames * 10.0f * 0.3f);
                 if(m->peak == 0 || max > m->peak) m->peak = max;
                 if(nf) m->nf = nf;
