@@ -3,6 +3,10 @@
 - The hunt screen now shows the channel noise floor: a marker tick above the
   signal meter and an "nf" reading, so the gap between the signal and the noise
   (your headroom) is visible at a glance. Requires board firmware v6.
+- More at-a-glance hunt cues: a trend arrow by the heat word shows whether the
+  signal is rising or falling as you move, a frame-rate reading tells a chatty
+  transmitter from a near-idle one, and a "quiet Ns" timer shows how long a lost
+  target has been silent.
 
 ## v1.8
 
