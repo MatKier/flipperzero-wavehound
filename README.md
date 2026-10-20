@@ -133,11 +133,16 @@ first and recommended; verified building with PlatformIO + ESP-IDF 6.1.
 
 ### Option A: PlatformIO (recommended)
 
-Install PlatformIO Core once, globally (needs Python 3 with `pip`):
+Install PlatformIO Core once with [pipx](https://pipx.pypa.io/) (e.g.
+`apt install pipx` or `brew install pipx`, then `pipx ensurepath`):
 
 ```bash
-pip install -U platformio
+pipx install platformio      # later: pipx upgrade platformio
 ```
+
+Plain `pip install` into the system Python is refused on most current distros
+(`externally-managed-environment`); if you don't use pipx, `pip install
+platformio` inside a venv works too.
 
 Check it runs:
 
@@ -147,9 +152,8 @@ pio --version
 
 > If `pio` fails with `No module named 'requirements'`, an unrelated PyPI
 > package named `pio` is shadowing PlatformIO's command. Remove it and restore
-> PlatformIO's launcher:
-> `pip uninstall -y pio && pip install --force-reinstall --no-deps platformio`.
-> In any case, `python -m platformio <args>` always calls the real PlatformIO.
+> PlatformIO's launcher: `pipx uninstall pio && pipx reinstall platformio`
+> (in a venv: `pip uninstall -y pio && pip install --force-reinstall --no-deps platformio`).
 
 Put the board in **download mode**: hold **BOOT**, tap **RESET**, release
 **BOOT**, then connect the board to your PC with its own USB-C port (directly,
@@ -209,7 +213,7 @@ Tap **RESET** after flashing to boot the new firmware.
 ## 2. Build and install the Flipper app
 
 ```bash
-pip install ufbt
+pipx install ufbt   # or: pip install ufbt inside a venv
 cd flipper_app
 ufbt            # build -> dist/wavehound.fap
 ufbt launch     # build, upload over USB and run

@@ -53,7 +53,7 @@ def build_fap(ufbt, launch, extra):
     if not exe:
         sys.exit(
             f"'{ufbt}' not found on PATH. Install it with "
-            "'pip install ufbt' (see flipperzero-ufbt), or pass --no-build."
+            "'pipx install ufbt' (see flipperzero-ufbt), or pass --no-build."
         )
     # `ufbt launch` builds, uploads the .fap to a connected Flipper and runs it;
     # plain `ufbt` just builds.
