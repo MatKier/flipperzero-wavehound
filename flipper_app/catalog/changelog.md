@@ -1,3 +1,9 @@
+## v1.9
+
+- The hunt screen now shows the channel noise floor: a marker tick above the
+  signal meter and an "nf" reading, so the gap between the signal and the noise
+  (your headroom) is visible at a glance. Requires board firmware v6.
+
 ## v1.8
 
 - Fixed "Keep backlight" leaving the screen stuck on. The setting forces the

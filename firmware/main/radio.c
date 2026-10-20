@@ -72,6 +72,7 @@ static uint8_t s_target[6];
 static struct {
     uint32_t frames;
     int32_t rssi_sum;
+    int32_t noise_sum;
     int8_t rssi_last;
     int8_t rssi_max;
 } s_hunt;
@@ -258,6 +259,7 @@ static void promisc_cb(void *buf, wifi_promiscuous_pkt_type_t type)
         if (has_tx && memcmp(tx, s_target, 6) == 0) {
             s_hunt.frames++;
             s_hunt.rssi_sum += rssi;
+            s_hunt.noise_sum += pkt->rx_ctrl.noise_floor;
             s_hunt.rssi_last = rssi;
             if (s_hunt.frames == 1 || rssi > s_hunt.rssi_max) {
                 s_hunt.rssi_max = rssi;
@@ -317,14 +319,16 @@ static void hunt_tick(void)
     portENTER_CRITICAL(&s_mux);
     const uint32_t frames = s_hunt.frames;
     const int32_t sum = s_hunt.rssi_sum;
+    const int32_t noise_sum = s_hunt.noise_sum;
     const int last = s_hunt.rssi_last;
     const int max = s_hunt.rssi_max;
     memset(&s_hunt, 0, sizeof(s_hunt));
     portEXIT_CRITICAL(&s_mux);
 
     const int avg = frames ? (int)(sum / (int32_t)frames) : 0;
-    proto_sendf("H,%u,%lu,%d,%d,%d,%d", s_channel, (unsigned long)frames, frames ? last : 0, avg,
-                frames ? max : 0, s_hunt_locked ? 1 : 0);
+    const int nf = frames ? (int)(noise_sum / (int32_t)frames) : 0;
+    proto_sendf("H,%u,%lu,%d,%d,%d,%d,%d", s_channel, (unsigned long)frames, frames ? last : 0, avg,
+                frames ? max : 0, s_hunt_locked ? 1 : 0, nf);
     led_show_heat(avg);
 
     if (frames) {

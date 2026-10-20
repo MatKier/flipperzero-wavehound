@@ -25,6 +25,7 @@ typedef struct {
     bool heard; /* heard the target within LOST_AFTER_MS */
     float rssi; /* smoothed, 0 = nothing yet */
     int8_t peak;
+    int8_t nf; /* mean noise floor (dBm), 0 = unknown */
     uint32_t frames_total;
     int8_t history[HISTORY_LEN];
     uint8_t history_pos;
@@ -117,6 +118,13 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
         int px = 2 + (int)(rssi_fraction(m->peak, m->rssi_floor, m->rssi_ceil) * 123);
         canvas_draw_line(canvas, px, 33, px, 42);
     }
+    /* Noise floor marker: a short tick above the meter. The gap to the signal
+     * fill is the headroom. Distinct from the full-height peak tick. */
+    if(m->nf) {
+        int nx = 2 + (int)(rssi_fraction(m->nf, m->rssi_floor, m->rssi_ceil) * 123);
+        canvas_draw_line(canvas, nx, 31, nx, 33); /* pokes above the meter */
+        canvas_draw_line(canvas, nx, 42, nx, 43); /* and slightly below, like pk */
+    }
 
     /* History graph, newest sample on the right */
     const int graph_h = GRAPH_BOTTOM - GRAPH_TOP;
@@ -128,12 +136,15 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
     }
     canvas_draw_dot(canvas, 0, GRAPH_TOP);
 
-    if(!m->sound) {
-        canvas_set_font(canvas, FontKeyboard);
+    /* Noise floor value, over the graph where the MUTE label used to sit. The
+     * white box keeps it legible against the graph bars. */
+    if(m->nf) {
+        snprintf(buf, sizeof(buf), "nf %d", m->nf);
+        canvas_set_font(canvas, FontSecondary);
         canvas_set_color(canvas, ColorWhite);
-        canvas_draw_box(canvas, 0, GRAPH_TOP, 25, 9);
+        canvas_draw_box(canvas, 0, GRAPH_TOP, 40, 9);
         canvas_set_color(canvas, ColorBlack);
-        canvas_draw_str(canvas, 1, GRAPH_TOP + 8, "MUTE");
+        canvas_draw_str(canvas, 1, GRAPH_TOP + 8, buf);
     }
 }
 
@@ -366,7 +377,8 @@ void wh_hunt_view_push_sample(
     int8_t last,
     int8_t avg,
     int8_t max,
-    bool locked) {
+    bool locked,
+    int8_t nf) {
     UNUSED(last);
     uint32_t now = furi_get_tick();
     if(frames) hunt->last_heard_tick = now;
@@ -385,6 +397,7 @@ void wh_hunt_view_push_sample(
                 m->frames_total += frames;
                 m->rssi = (m->rssi == 0) ? avg : (m->rssi * 0.6f + avg * 0.4f);
                 if(m->peak == 0 || max > m->peak) m->peak = max;
+                if(nf) m->nf = nf;
             } else if(!heard) {
                 m->rssi = 0;
             }

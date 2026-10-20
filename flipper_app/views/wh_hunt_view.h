@@ -34,7 +34,9 @@ uint8_t wh_hunt_view_current_channel(WhHuntView* hunt);
 /** Reset the view for a new target. */
 void wh_hunt_view_set_target(WhHuntView* hunt, const char* name, uint8_t channel);
 
-/** Feed one `H` sample from the board. Safe to call from any thread. */
+/** Feed one `H` sample from the board. Safe to call from any thread. `nf` is the
+ * mean noise floor in dBm (0 when the target was not heard, or from firmware too
+ * old to send it). */
 void wh_hunt_view_push_sample(
     WhHuntView* hunt,
     uint8_t channel,
@@ -42,4 +44,5 @@ void wh_hunt_view_push_sample(
     int8_t last,
     int8_t avg,
     int8_t max,
-    bool locked);
+    bool locked,
+    int8_t nf);

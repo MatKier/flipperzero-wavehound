@@ -92,7 +92,8 @@ static void wh_on_line(char* line, void* context) {
         int8_t avg = field_int(&cur);
         int8_t max = field_int(&cur);
         bool locked = field_int(&cur) != 0;
-        wh_hunt_view_push_sample(app->hunt, ch, frames, last, avg, max, locked);
+        int8_t nf = field_int(&cur); /* 0 from older firmware (field absent) */
+        wh_hunt_view_push_sample(app->hunt, ch, frames, last, avg, max, locked, nf);
     } else if(strcmp(tag, "S") == 0) {
         uint8_t ch = field_int(&cur);
         uint32_t frames = field_int(&cur);

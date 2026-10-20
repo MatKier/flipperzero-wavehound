@@ -27,7 +27,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `PONG,<version>`                               | Reply to `PING`.                      |
 | `OK,<command>`                                 | Command accepted.                     |
 | `ERR,<reason>`                                 | Command rejected.                     |
-| `H,<ch>,<frames>,<last>,<avg>,<max>,<locked>`  | Hunt sample, every 100 ms. RSSI values in dBm, `0` when no frame was heard in the window. `locked` is `1` while parked on a channel, `0` while hopping. |
+| `H,<ch>,<frames>,<last>,<avg>,<max>,<locked>,<nf>` | Hunt sample, every 100 ms. RSSI values in dBm, `0` when no frame was heard in the window. `locked` is `1` while parked on a channel, `0` while hopping. `nf` is the mean noise floor (dBm) over the window, `0` when nothing was heard; the app marks it on the signal meter. |
 | `S,<ch>,<frames>,<bytes>,<max_rssi>`           | Spectrum dwell result for one channel (120 ms dwell). |
 | `U,<unique>`                                   | End of a spectrum sweep: distinct transmitter MACs heard during it. |
 | `DISCOVER_BEGIN,<filter>,<ch>`                 | Search started (`ch` 0 = hopping).    |
