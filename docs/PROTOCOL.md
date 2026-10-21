@@ -10,14 +10,29 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | Command               | Meaning                                                        |
 |-----------------------|----------------------------------------------------------------|
 | `PING`                | Liveness check. Board answers `PONG,<version>`.                |
-| `HUNT,<mac>,<ch>[,PIN]` | Track frames transmitted by `<mac>` on channel `<ch>`. `ch=0` hops until the target is heard. `PIN` (needs `ch>0`) keeps the radio on `<ch>` even when the target goes quiet. |
+| `HUNT,<mac>,<ch>[,PIN][,DWELL=<ms>][,LOST=<s>]` | Track frames transmitted by `<mac>` on channel `<ch>`. `ch=0` hops until the target is heard. `PIN` (needs `ch>0`) keeps the radio on `<ch>` even when the target goes quiet. Optional [timing tokens](#timing-tokens): `DWELL` is the per-channel dwell while searching (default 300 ms), `LOST` the silence before a locked hunt searches again (default 8 s). |
 | `SPECTRUM`            | Sweep channels 1..N, report per-channel activity.              |
-| `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). |
+| `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). Optional [timing token](#timing-tokens) `DWELL` (after `<bssid>` for `CLIENTS`, else after `<ch>`) sets the per-channel dwell when hopping (default 120 ms); `DEV` lines are also streamed at that cadence. |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
 | `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. The idle LED stays lit (blue). |
 | `SLEEP`               | Like `STOP`, but also turn the LED off (dark idle). The app sends this on exit, since the board stays powered on the Flipper's always-on 3V3 rail. |
 
 `<mac>` is `aa:bb:cc:dd:ee:ff` (case-insensitive).
+
+### Timing tokens
+
+`HUNT` and `DISCOVER` take optional trailing `KEY=value` tokens, after all
+positional fields, in any order. Unknown tokens are ignored. Out-of-range values
+are clamped. A missing token keeps the default.
+
+| Token          | Range        | Applies to         | Default |
+|----------------|--------------|--------------------|---------|
+| `DWELL=<ms>`   | 100–2000     | `HUNT` (rounded to 100 ms), `DISCOVER` | 300 / 120 |
+| `LOST=<s>`     | 2–120        | `HUNT`             | 8       |
+
+Firmware before v8 only reads the positional fields (and `PIN` right after
+`<ch>`), so it ignores the tokens and keeps the defaults. Senders must therefore
+put `PIN` before any token.
 
 ## Board -> Flipper
 
@@ -50,7 +65,8 @@ reported as ordinary station `DEV` lines (flag `S`, no SSID).
 
 Hunting works for any transmitter MAC, not just access points: the board
 matches the frame's transmitter address (addr2) of management and data frames.
-With `ch=0`, or after 8 s of silence (unless `PIN`), it hops channels (300 ms
-dwell) until it hears the target again.
+With `ch=0`, or after `LOST` seconds of silence (default 8 s; never with `PIN`),
+it hops channels (`DWELL` per channel, default 300 ms) until it hears the target
+again.
 
 SSIDs are sanitized: control characters become `?`, so every message stays on one line.

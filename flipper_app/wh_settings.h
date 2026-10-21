@@ -20,6 +20,19 @@ typedef enum {
     WhRangeModeCount,
 } WhRangeMode;
 
+/** How quickly the hunt's RSSI readout and meter follow new samples. */
+typedef enum {
+    WhResponseFast,   /* jumpy, reacts within a sample or two */
+    WhResponseNormal, /* default */
+    WhResponseSmooth, /* steadier, slower to settle */
+    WhResponseModeCount,
+} WhMeterResponse;
+
+/* Preset counts for the board timing settings (see the wh_settings_*_ms/_s maps). */
+#define WH_HOP_DWELL_COUNT 6
+#define WH_RESEARCH_COUNT 5
+#define WH_SCAN_DWELL_COUNT 5
+
 /** User preferences, persisted to the SD card. */
 typedef struct {
     float click_volume;      /* geiger click loudness, 0.1..1.0 */
@@ -28,7 +41,26 @@ typedef struct {
     bool haptic;             /* buzz the motor as a proximity cue while hunting */
     bool keep_backlight;     /* hold the backlight on during a hunt */
     uint8_t range_mode;      /* WhRangeMode */
+    uint8_t meter_response;  /* WhMeterResponse */
+    uint8_t hop_dwell;       /* preset index: per-channel dwell while a hunt searches */
+    uint8_t research;        /* preset index: silence before a locked hunt searches again */
+    uint8_t scan_dwell;      /* preset index: per-channel dwell while scanning */
 } WhSettings;
+
+/** Fill `s` with the default settings. */
+void wh_settings_reset(WhSettings* s);
 
 /** Map a WhRangeMode to the dBm floor (meter empty) and ceiling (meter full). */
 void wh_settings_range_bounds(uint8_t mode, int8_t* floor, int8_t* ceil);
+
+/** Weight (0..1) of each new sample in the hunt meter's smoothing. */
+float wh_settings_meter_alpha(uint8_t mode);
+
+/** Hunt dwell per channel while searching, in ms, for a hop_dwell preset. */
+uint16_t wh_settings_hop_dwell_ms(uint8_t idx);
+
+/** Silence before a locked hunt searches again, in seconds, for a research preset. */
+uint16_t wh_settings_research_s(uint8_t idx);
+
+/** Scan (DISCOVER) dwell per channel, in ms, for a scan_dwell preset. */
+uint16_t wh_settings_scan_dwell_ms(uint8_t idx);

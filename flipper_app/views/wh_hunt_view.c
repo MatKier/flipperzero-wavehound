@@ -10,6 +10,7 @@
 #define LOST_AFTER_MS 2000
 #define RSSI_FLOOR_DEFAULT (-95)
 #define RSSI_CEIL_DEFAULT (-30)
+#define RESPONSE_DEFAULT 0.4f
 
 #define GRAPH_TOP 44
 #define GRAPH_BOTTOM 63
@@ -47,6 +48,7 @@ struct WhHuntView {
     volatile float volume; /* click loudness, 0..1 */
     volatile int8_t rssi_floor; /* meter/click range, mirrors the model */
     volatile int8_t rssi_ceil;
+    float response; /* weight of a new sample in the meter's smoothing */
     uint32_t last_heard_tick;
     WhHuntSaveCallback save_cb;
     void* save_ctx;
@@ -305,6 +307,7 @@ WhHuntView* wh_hunt_view_alloc(void) {
     memset(hunt, 0, sizeof(WhHuntView));
     hunt->sound = true;
     hunt->volume = 0.5f;
+    hunt->response = RESPONSE_DEFAULT;
     hunt->rssi_floor = RSSI_FLOOR_DEFAULT;
     hunt->rssi_ceil = RSSI_CEIL_DEFAULT;
     hunt->view = view_alloc();
@@ -369,6 +372,12 @@ void wh_hunt_view_set_range(WhHuntView* hunt, int8_t floor, int8_t ceil) {
         true);
 }
 
+void wh_hunt_view_set_response(WhHuntView* hunt, float alpha) {
+    if(alpha < 0.05f) alpha = 0.05f;
+    if(alpha > 1.0f) alpha = 1.0f;
+    hunt->response = alpha;
+}
+
 uint8_t wh_hunt_view_current_channel(WhHuntView* hunt) {
     uint8_t ch = 0;
     with_view_model(
@@ -422,7 +431,8 @@ void wh_hunt_view_push_sample(
             m->heard = heard;
             if(frames) {
                 m->frames_total += frames;
-                m->rssi = (m->rssi == 0) ? avg : (m->rssi * 0.6f + avg * 0.4f);
+                m->rssi = (m->rssi == 0) ? avg :
+                                            (m->rssi * (1.0f - hunt->response) + avg * hunt->response);
                 m->rssi_slow = (m->rssi_slow == 0) ? avg : (m->rssi_slow * 0.96f + avg * 0.04f);
                 float d = m->rssi - m->rssi_slow;
                 /* Hysteresis so the arrow sticks instead of flickering: commit to a

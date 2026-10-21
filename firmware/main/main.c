@@ -22,6 +22,12 @@
 
 #define LINE_MAX 96
 
+/* Bounds for the optional timing tokens (DWELL=<ms>, LOST=<s>). */
+#define DWELL_MIN_MS 100
+#define DWELL_MAX_MS 2000
+#define LOST_MIN_S 2
+#define LOST_MAX_S 120
+
 static bool parse_mac(const char *s, uint8_t mac[6])
 {
     unsigned int b[6];
@@ -54,15 +60,42 @@ static bool parse_channel(const char *s, int *ch)
     return *ch >= 0 && *ch <= CONFIG_WH_MAX_CHANNEL;
 }
 
+/* Optional trailing tokens shared by HUNT and DISCOVER. Unknown tokens are
+ * ignored, so newer apps can add more without breaking this firmware. */
+typedef struct {
+    bool pin;
+    unsigned dwell_ms; /* 0 = not given */
+    unsigned lost_s;   /* 0 = not given */
+} tokens_t;
+
+static unsigned clamp_u(int v, unsigned lo, unsigned hi)
+{
+    return v < (int)lo ? lo : v > (int)hi ? hi : (unsigned)v;
+}
+
+static void parse_tokens(char **f, int from, int n, tokens_t *t)
+{
+    memset(t, 0, sizeof(*t));
+    for (int i = from; i < n; i++) {
+        if (strcasecmp(f[i], "PIN") == 0) {
+            t->pin = true;
+        } else if (strncasecmp(f[i], "DWELL=", 6) == 0) {
+            t->dwell_ms = clamp_u(atoi(f[i] + 6), DWELL_MIN_MS, DWELL_MAX_MS);
+        } else if (strncasecmp(f[i], "LOST=", 5) == 0) {
+            t->lost_s = clamp_u(atoi(f[i] + 5), LOST_MIN_S, LOST_MAX_S);
+        }
+    }
+}
+
 static void handle_hunt(char *args)
 {
-    /* args: "<mac>,<ch>[,PIN]" */
-    char *f[3] = {0};
-    int n = split_args(args, f, 3);
+    /* args: "<mac>,<ch>[,PIN][,DWELL=<ms>][,LOST=<s>]" */
+    char *f[5] = {0};
+    int n = split_args(args, f, 5);
     uint8_t mac[6];
     int ch;
     if (n < 2) {
-        proto_sendf("ERR,usage HUNT,<mac>,<ch>[,PIN]");
+        proto_sendf("ERR,usage HUNT,<mac>,<ch>[,PIN][,DWELL=<ms>][,LOST=<s>]");
         return;
     }
     if (!parse_mac(f[0], mac)) {
@@ -73,20 +106,24 @@ static void handle_hunt(char *args)
         proto_sendf("ERR,bad channel");
         return;
     }
-    const bool pinned = n == 3 && strcasecmp(f[2], "PIN") == 0;
-    if (pinned && ch == 0) {
+    tokens_t t;
+    parse_tokens(f, 2, n, &t);
+    if (t.pin && ch == 0) {
         proto_sendf("ERR,PIN needs a channel");
         return;
     }
-    radio_hunt(mac, (uint8_t)ch, pinned);
+    /* Round the dwell to whole hunt periods. */
+    const uint16_t hop = (t.dwell_ms + RADIO_HUNT_PERIOD_MS / 2) / RADIO_HUNT_PERIOD_MS;
+    const uint16_t lost = t.lost_s * 1000 / RADIO_HUNT_PERIOD_MS;
+    radio_hunt(mac, (uint8_t)ch, t.pin, hop, lost);
     proto_sendf("OK,HUNT");
 }
 
 static void handle_discover(char *args)
 {
-    /* args: "[ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]]" */
-    char *f[3] = {0};
-    int n = split_args(args, f, 3);
+    /* args: "[ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>]" */
+    char *f[4] = {0};
+    int n = split_args(args, f, 4);
     radio_discover_filter_t filter = DISCOVER_FILTER_ALL;
     int ch = 0;
 
@@ -111,8 +148,12 @@ static void handle_discover(char *args)
         proto_sendf("ERR,CLIENTS needs a BSSID: DISCOVER,CLIENTS,<ch>,<bssid>");
         return;
     }
+    /* Tokens follow the positional fields: after <bssid> for CLIENTS, else <ch>. */
+    tokens_t t;
+    parse_tokens(f, filter == DISCOVER_FILTER_CLIENTS ? 3 : 2, n, &t);
     proto_sendf("OK,DISCOVER");
-    radio_discover(filter, (uint8_t)ch, filter == DISCOVER_FILTER_CLIENTS ? bssid : NULL);
+    radio_discover(filter, (uint8_t)ch, filter == DISCOVER_FILTER_CLIENTS ? bssid : NULL,
+                   (uint16_t)t.dwell_ms);
 }
 
 static void handle_line(char *line)

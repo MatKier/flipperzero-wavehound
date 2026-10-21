@@ -28,6 +28,9 @@ void wh_hunt_view_set_haptic(WhHuntView* hunt, bool on);
 /** Set the dBm window the meter and click/haptic rate span (floor..ceil). */
 void wh_hunt_view_set_range(WhHuntView* hunt, int8_t floor, int8_t ceil);
 
+/** Set how much each new sample moves the meter (0..1; higher = faster, jumpier). */
+void wh_hunt_view_set_response(WhHuntView* hunt, float alpha);
+
 /** Channel the hunt is currently locked on, or 0 if still hopping/seeking. */
 uint8_t wh_hunt_view_current_channel(WhHuntView* hunt);
 
