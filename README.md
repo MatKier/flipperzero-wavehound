@@ -22,13 +22,15 @@ Typical uses:
 - See which 2.4 GHz channel is least congested before you configure your router.
 
 Wavehound is **receive-only**: it reads frame headers to measure signal strength
-and never transmits. It isn't built on Marauder because the hunt — tracking the
-per-frame RSSI of one specific target in promiscuous mode, with channel parking
-and hopping — has to run on the ESP32 in real time. That loop can't live in the
-Flipper app (the `.fap`), which is only a thin UART client that renders what the
-board reports, so the hunting logic runs in the board's own firmware. Marauder is
-its own board firmware with a fixed command set that doesn't expose this, which
-is why Wavehound ships custom firmware rather than building on it.
+and never transmits. It ships its own board firmware rather than building on
+[ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) because of how
+Marauder's fox hunt handles the channel: it parks on the target's channel only
+while the target was heard in roughly the last 1.5 s, and otherwise hops across
+all channels, with no way to pin it. For a quiet target — an idle phone, a
+sleepy IoT sensor — that means the radio spends most of its time on other
+channels and misses the target's sparse frames, so the signal keeps dropping
+out. Wavehound's firmware instead stays parked on the chosen channel, which is
+what makes close-in fox hunting of an occasional transmitter practical.
 
 ```
 ┌──────────── Flipper Zero ─────────────┐        ┌──── WiFi dev board (ESP32-S2) ─────┐
