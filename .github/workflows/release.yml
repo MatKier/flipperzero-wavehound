@@ -1,0 +1,116 @@
+# Build the Flipper app (with oui.db) and the board firmware.
+#
+# - push to main: build + package as a CI check, and save the caches (toolchains,
+#   this week's manuf). Tag runs can only restore caches saved on main, not ones
+#   saved by other tag runs, so main is where they get saved.
+# - v<fap_version> tag: build, package and publish the GitHub release.
+# - workflow_dispatch: same files as a build artifact, no release.
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  FLIPPER_SDK: "1.5.1"   # firmware SDK the app is built against (API 88.2)
+  UFBT_VERSION: "0.2.6"
+  PIO_VERSION: "6.2.0"
+  SAVE_CACHES: ${{ github.ref == 'refs/heads/main' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+
+      - name: Check tag matches fap_version
+        if: github.ref_type == 'tag'
+        run: |
+          ver=$(sed -nE 's/^\s*fap_version="([^"]+)".*/\1/p' flipper_app/application.fam)
+          if [ "v$ver" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match fap_version $ver"
+            exit 1
+          fi
+
+      - name: Install ufbt and PlatformIO
+        run: pip install "ufbt==$UFBT_VERSION" "platformio==$PIO_VERSION"
+
+      # Wireshark updates manuf weekly and asks not to fetch it more often, so
+      # keep one copy per ISO week and download only on a miss.
+      - name: Cache keys
+        id: keys
+        run: |
+          echo "manuf=manuf-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+          echo "toolchains=toolchains-${{ runner.os }}-$FLIPPER_SDK-${{ hashFiles('firmware/platformio.ini') }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        id: manuf
+        with:
+          path: manuf.gz
+          key: ${{ steps.keys.outputs.manuf }}
+
+      - name: Fetch Wireshark manuf
+        if: steps.manuf.outputs.cache-hit != 'true'
+        run: curl -fsSL -o manuf.gz https://www.wireshark.org/download/automated/data/manuf.gz
+
+      # Saved right away, so a tag pushed while this run is still building can use it.
+      - uses: actions/cache/save@v4
+        if: env.SAVE_CACHES == 'true' && steps.manuf.outputs.cache-hit != 'true'
+        with:
+          path: manuf.gz
+          key: ${{ steps.keys.outputs.manuf }}
+
+      - uses: actions/cache/restore@v4
+        id: toolchains
+        with:
+          path: |
+            ~/.platformio
+            ~/.ufbt
+          key: ${{ steps.keys.outputs.toolchains }}
+
+      - name: Build Flipper app
+        run: |
+          gunzip -k manuf.gz
+          ufbt update --hw-target f7 --url "https://update.flipperzero.one/builds/firmware/$FLIPPER_SDK/flipper-z-f7-sdk-$FLIPPER_SDK.zip"
+          python3 build_app.py --manuf manuf
+
+      - name: Build board firmware
+        run: pio run -d firmware
+
+      - uses: actions/cache/save@v4
+        if: env.SAVE_CACHES == 'true' && steps.toolchains.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.platformio
+            ~/.ufbt
+          key: ${{ steps.keys.outputs.toolchains }}
+
+      - name: Package
+        run: python3 tools/package_release.py --manuf manuf.gz -o dist --notes release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wavehound-${{ github.ref_name }}
+          path: dist/
+          retention-days: 7
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag --title "Wavehound $GITHUB_REF_NAME" --notes-file release-notes.md
