@@ -21,9 +21,9 @@
 
 /* Board timing presets. Defaults match the firmware's built-in values, so older
  * board firmware (which ignores the timing tokens) behaves the same. */
-static const uint16_t hop_dwell_ms[WH_HOP_DWELL_COUNT] = {100, 200, 300, 500, 1000};
+static const uint16_t hop_dwell_ms[WH_HOP_DWELL_COUNT] = {100, 200, 300, 500, 1000, 2000};
 static const uint16_t research_s[WH_RESEARCH_COUNT] = {4, 8, 15, 30, 60};
-static const uint16_t scan_dwell_ms[WH_SCAN_DWELL_COUNT] = {120, 250, 500, 1000};
+static const uint16_t scan_dwell_ms[WH_SCAN_DWELL_COUNT] = {120, 250, 500, 1000, 2000};
 
 void wh_settings_reset(WhSettings* s) {
     s->click_volume = 0.5f;

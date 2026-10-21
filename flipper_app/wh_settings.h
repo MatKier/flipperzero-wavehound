@@ -29,9 +29,9 @@ typedef enum {
 } WhMeterResponse;
 
 /* Preset counts for the board timing settings (see the wh_settings_*_ms/_s maps). */
-#define WH_HOP_DWELL_COUNT 5
+#define WH_HOP_DWELL_COUNT 6
 #define WH_RESEARCH_COUNT 5
-#define WH_SCAN_DWELL_COUNT 4
+#define WH_SCAN_DWELL_COUNT 5
 
 /** User preferences, persisted to the SD card. */
 typedef struct {
