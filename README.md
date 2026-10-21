@@ -23,14 +23,19 @@ Typical uses:
 
 Wavehound is **receive-only**: it reads frame headers to measure signal strength
 and never transmits. It ships its own board firmware rather than building on
-[ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) because of how
-Marauder's fox hunt handles the channel: it parks on the target's channel only
-while the target was heard in roughly the last 1.5 s, and otherwise hops across
-all channels, with no way to pin it. For a quiet target — an idle phone, a
-sleepy IoT sensor — that means the radio spends most of its time on other
-channels and misses the target's sparse frames, so the signal keeps dropping
-out. Wavehound's firmware instead stays parked on the chosen channel, which is
-what makes close-in fox hunting of an occasional transmitter practical.
+[ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) because of what
+Marauder's fox hunt leaves out on a screenless board like the WiFi dev board: its
+channel logic — park on the target's channel, sweep to find it, re-acquire when
+it goes quiet — lives in the on-device TFT code, which is compiled out of the
+dev-board build. What is left just reports RSSI on whatever single channel the
+hunt started on: it can't sweep to find a target whose channel you don't know,
+and it won't follow one that moves channel. Its AP/station scan likewise hops
+every channel with no way to pin it, which makes finding a specific AP's clients
+slow and loose. Wavehound's firmware does all of that channel work — park,
+sweep-until-heard, re-acquire, and a strict client filter — which is what makes
+close-in fox hunting of an occasional transmitter practical. (A Flipper app can
+perfectly well drive a board over UART — this split is about capability on the
+board, not about where the code can run.)
 
 ```
 ┌──────────── Flipper Zero ─────────────┐        ┌──── WiFi dev board (ESP32-S2) ─────┐
