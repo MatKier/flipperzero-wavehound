@@ -14,7 +14,8 @@
 #include "led.h"
 #include "proto.h"
 
-#define HUNT_PERIOD_MS 100
+#define HUNT_PERIOD_MS RADIO_HUNT_PERIOD_MS
+/* Defaults; HUNT/DISCOVER may override them per command. */
 #define HUNT_LOST_PERIODS 80 /* 8 s without the target -> start hopping again */
 #define HUNT_HOP_PERIODS 3   /* dwell per channel while searching */
 #define SPECTRUM_DWELL_MS 120
@@ -48,6 +49,9 @@ typedef struct {
     uint8_t channel;
     radio_discover_filter_t filter;
     bool pinned;
+    uint16_t hop_periods;  /* hunt: 0 = HUNT_HOP_PERIODS */
+    uint16_t lost_periods; /* hunt: 0 = HUNT_LOST_PERIODS */
+    uint16_t dwell_ms;     /* discover: 0 = DISCOVER_DWELL_MS */
 } radio_cmd_t;
 
 #define DEV_FLAG_AP 0x01         /* transmitted like an access point */
@@ -123,6 +127,9 @@ static bool s_hunt_pinned;
 static uint8_t s_disc_channel; /* 0 = hop */
 static uint32_t s_hunt_quiet_periods;
 static uint32_t s_hunt_hop_periods;
+static uint32_t s_hunt_hop_limit = HUNT_HOP_PERIODS;
+static uint32_t s_hunt_lost_limit = HUNT_LOST_PERIODS;
+static uint32_t s_disc_dwell_ms = DISCOVER_DWELL_MS;
 static uint16_t s_disc_cursor;     /* table slots already examined */
 static uint16_t s_disc_streamed;   /* wanted DEV lines already sent */
 static uint16_t s_disc_prev_count; /* table size seen at the previous tick */
@@ -381,6 +388,8 @@ static void hunt_start(const radio_cmd_t *cmd)
     s_hunt_pinned = cmd->pinned && cmd->channel != 0;
     s_hunt_quiet_periods = 0;
     s_hunt_hop_periods = 0;
+    s_hunt_hop_limit = cmd->hop_periods ? cmd->hop_periods : HUNT_HOP_PERIODS;
+    s_hunt_lost_limit = cmd->lost_periods ? cmd->lost_periods : HUNT_LOST_PERIODS;
     set_channel(cmd->channel ? cmd->channel : 1);
     set_mode(MODE_HUNT);
 }
@@ -413,12 +422,12 @@ static void hunt_tick(void)
     }
 
     if (s_hunt_locked) {
-        if (++s_hunt_quiet_periods >= HUNT_LOST_PERIODS) {
+        if (++s_hunt_quiet_periods >= s_hunt_lost_limit) {
             /* Target went silent or moved channel: search again. */
             s_hunt_locked = false;
             s_hunt_hop_periods = 0;
         }
-    } else if (++s_hunt_hop_periods >= HUNT_HOP_PERIODS) {
+    } else if (++s_hunt_hop_periods >= s_hunt_hop_limit) {
         s_hunt_hop_periods = 0;
         set_channel(next_channel(s_channel));
     }
@@ -469,10 +478,12 @@ static bool discover_wanted(const discover_dev_t *d)
     }
 }
 
-static void discover_start(radio_discover_filter_t filter, uint8_t channel, const uint8_t *bssid)
+static void discover_start(radio_discover_filter_t filter, uint8_t channel, const uint8_t *bssid,
+                           uint16_t dwell_ms)
 {
     set_mode(MODE_IDLE);
     s_dev_count = 0;
+    s_disc_dwell_ms = dwell_ms ? dwell_ms : DISCOVER_DWELL_MS;
     s_disc_filter = filter;
     s_disc_channel = channel;
     memcpy(s_disc_bssid, bssid ? bssid : (const uint8_t[6]){0}, 6);
@@ -555,7 +566,7 @@ static void radio_task(void *arg)
         } else if (s_mode == MODE_SPECTRUM) {
             wait = pdMS_TO_TICKS(SPECTRUM_DWELL_MS);
         } else if (s_mode == MODE_DISCOVER) {
-            wait = pdMS_TO_TICKS(DISCOVER_DWELL_MS);
+            wait = pdMS_TO_TICKS(s_disc_dwell_ms);
         }
 
         if (xQueueReceive(s_cmd_queue, &cmd, wait) == pdTRUE) {
@@ -575,7 +586,7 @@ static void radio_task(void *arg)
                 spectrum_start();
                 break;
             case CMD_DISCOVER:
-                discover_start(cmd.filter, cmd.channel, cmd.mac);
+                discover_start(cmd.filter, cmd.channel, cmd.mac, cmd.dwell_ms);
                 break;
             }
             continue;
@@ -630,9 +641,14 @@ void radio_init(void)
     xTaskCreate(radio_task, "radio", 4096, NULL, 5, NULL);
 }
 
-void radio_hunt(const uint8_t mac[6], uint8_t channel, bool pinned)
+void radio_hunt(const uint8_t mac[6], uint8_t channel, bool pinned, uint16_t hop_periods,
+                uint16_t lost_periods)
 {
-    radio_cmd_t cmd = {.type = CMD_HUNT, .channel = channel, .pinned = pinned};
+    radio_cmd_t cmd = {.type = CMD_HUNT,
+                       .channel = channel,
+                       .pinned = pinned,
+                       .hop_periods = hop_periods,
+                       .lost_periods = lost_periods};
     memcpy(cmd.mac, mac, 6);
     post(&cmd);
 }
@@ -643,9 +659,11 @@ void radio_spectrum(void)
     post(&cmd);
 }
 
-void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t bssid[6])
+void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t bssid[6],
+                    uint16_t dwell_ms)
 {
-    radio_cmd_t cmd = {.type = CMD_DISCOVER, .filter = filter, .channel = channel};
+    radio_cmd_t cmd = {
+        .type = CMD_DISCOVER, .filter = filter, .channel = channel, .dwell_ms = dwell_ms};
     if (bssid) {
         memcpy(cmd.mac, bssid, 6); /* reused by discover_start as the CLIENTS target */
     }

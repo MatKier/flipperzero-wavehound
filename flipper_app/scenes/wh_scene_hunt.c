@@ -10,14 +10,18 @@ void wh_scene_hunt_on_enter(void* context) {
         notification_message(app->notifications, &sequence_display_backlight_enforce_on);
     }
 
-    char cmd[48];
+    /* PIN stays right after <ch>: older firmware only looks for it there and
+     * ignores the timing tokens that follow. */
+    char cmd[72];
     snprintf(
         cmd,
         sizeof(cmd),
-        "HUNT,%s,%u%s",
+        "HUNT,%s,%u%s,DWELL=%u,LOST=%u",
         t->mac,
         t->channel,
-        t->pin_channel && t->channel ? ",PIN" : "");
+        t->pin_channel && t->channel ? ",PIN" : "",
+        wh_settings_hop_dwell_ms(app->settings.hop_dwell),
+        wh_settings_research_s(app->settings.research));
     wh_send(app, cmd);
     view_dispatcher_switch_to_view(app->view_dispatcher, WhViewHunt);
 }

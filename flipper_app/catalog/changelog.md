@@ -1,3 +1,15 @@
+## v1.12
+
+- New settings: **Hop dwell** (how long a hunt stays on each channel while
+  searching for the target, 100 ms–1 s), **Re-search** (how long a locked hunt
+  waits in silence before it searches the channels again, 4–60 s), **Scan dwell**
+  (how long a scan stays on each channel, 120 ms–1 s; longer catches more quiet
+  devices but sweeps and fills the list more slowly) and **Response** (Fast /
+  Normal / Smooth smoothing of the hunt meter).
+- **Reset to defaults** at the bottom of Settings restores every setting.
+- Hop dwell, Re-search and Scan dwell need board firmware v8. Older firmware
+  keeps the fixed 300 ms / 8 s / 120 ms.
+
 ## v1.11
 
 - Picking a result from a scan and then pressing Back now keeps the devices

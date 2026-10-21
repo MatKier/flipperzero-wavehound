@@ -42,6 +42,7 @@ typedef enum {
     WhEventNameEntered,
     WhEventDetailsHunt,
     WhEventDetailsSave,
+    WhEventSettingsReset,
 } WhCustomEvent;
 
 /** A hunt target the user saved by name, persisted to the SD card. */
@@ -154,3 +155,6 @@ void wh_settings_load(WavehoundApp* app);
 
 /** Persist app->settings to the SD card. */
 void wh_settings_save(WavehoundApp* app);
+
+/** Push the hunt-screen settings (sound, haptic, range, response) into the view. */
+void wh_settings_apply(WavehoundApp* app);

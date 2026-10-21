@@ -47,11 +47,19 @@ static void wh_scene_target_list_send_discover(WavehoundApp* app) {
     const bool clients = kind == WhSearchClients;
     const uint8_t channel = aps ? 0 : clients ? app->clients_ap.channel : app->device_channel;
 
-    char cmd[48];
+    const unsigned dwell = wh_settings_scan_dwell_ms(app->settings.scan_dwell);
+
+    char cmd[64];
     if(clients) {
-        snprintf(cmd, sizeof(cmd), "DISCOVER,CLIENTS,%u,%s", channel, app->clients_ap.mac);
+        snprintf(
+            cmd,
+            sizeof(cmd),
+            "DISCOVER,CLIENTS,%u,%s,DWELL=%u",
+            channel,
+            app->clients_ap.mac,
+            dwell);
     } else {
-        snprintf(cmd, sizeof(cmd), "DISCOVER,%s,%u", aps ? "AP" : "STA", channel);
+        snprintf(cmd, sizeof(cmd), "DISCOVER,%s,%u,DWELL=%u", aps ? "AP" : "STA", channel, dwell);
     }
     wh_send(app, cmd);
 }
