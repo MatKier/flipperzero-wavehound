@@ -46,6 +46,7 @@ tools/gen_oui.py          build oui.db from Wireshark's manuf
 tools/package_release.py  collect release files (fap, board bins, merged bin, notices)
 build_app.py              generate+bundle oui.db, then run ufbt
 .github/workflows/release.yml  build app + firmware on every branch push (CI); on v* tag also publish the release
+.github/workflows/sdk-check.yml  weekly: open an issue when a newer Flipper SDK than FLIPPER_SDK is released
 THIRD_PARTY_NOTICES.md    licenses of what the release binaries contain
 docs/PROTOCOL.md          the UART protocol (source of truth for the wire format)
 ```
