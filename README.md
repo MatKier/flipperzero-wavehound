@@ -226,8 +226,9 @@ Running `ufbt` in `flipper_app/` directly also works and reuses an `oui.db`
 generated earlier; on a fresh clone the app is then built without one and shows
 vendors as "Unknown".
 
-Or copy `flipper_app/dist/wavehound.fap` to `SD:/apps/GPIO/ESP/` with qFlipper. The app shows up
-under **Apps → GPIO → ESP → Wavehound**. Built against official firmware SDK 1.5.1
+Or copy `flipper_app/dist/wavehound.fap` to `SD:/apps/GPIO/` with qFlipper, the same
+folder a Flipper Apps Catalog install uses (`fap_category="GPIO"`). The app shows up
+under **Apps → GPIO → Wavehound**. Built against official firmware SDK 1.5.1
 (API 88.2).
 
 ## 3. Use it

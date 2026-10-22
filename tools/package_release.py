@@ -185,7 +185,7 @@ def release_notes(version, fw, full, details):
         fail(f"no '## v{version}' entry in {CHANGELOG}")
     return (
         m.group(1).strip()
-        + f"\n\n---\n\nBoard firmware v{fw}. Copy `wavehound.fap` to `SD:/apps/GPIO/ESP/`; "
+        + f"\n\n---\n\nBoard firmware v{fw}. Copy `wavehound.fap` to `SD:/apps/GPIO/`; "
         f"flash `{full}` to the dev board at 0x0 (see `FLASHING.txt`). "
         "Third-party licenses: `THIRD_PARTY_NOTICES.md` and `wavehound-licenses.zip`.\n"
         f"\n### Build details\n\n{details}"
