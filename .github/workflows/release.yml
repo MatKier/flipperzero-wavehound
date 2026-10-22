@@ -35,9 +35,13 @@ jobs:
 
       # PlatformIO builds ESP-IDF's Python env from this one. Not 3.15 yet: its
       # pydantic-core has no 3.15 wheel and can't build from source (PyO3 <= 3.14).
+      # The pip cache is keyed on this file, where the ufbt/PlatformIO pins live.
       - uses: actions/setup-python@v7
+        id: python
         with:
           python-version: "3.14"
+          cache: pip
+          cache-dependency-path: .github/workflows/release.yml
 
       - name: Check tag matches fap_version
         if: github.ref_type == 'tag'
@@ -52,12 +56,13 @@ jobs:
         run: pip install "ufbt==$UFBT_VERSION" "platformio==$PIO_VERSION"
 
       # Wireshark updates manuf weekly and asks not to fetch it more often, so
-      # keep one copy per ISO week and download only on a miss.
+      # keep one copy per ISO week and download only on a miss. The toolchain key
+      # has the exact Python version: ESP-IDF's env in ~/.platformio is tied to it.
       - name: Cache keys
         id: keys
         run: |
           echo "manuf=manuf-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-          echo "toolchains=toolchains-${{ runner.os }}-$FLIPPER_SDK-${{ hashFiles('firmware/platformio.ini') }}" >> "$GITHUB_OUTPUT"
+          echo "toolchains=toolchains-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$FLIPPER_SDK-${{ hashFiles('firmware/platformio.ini') }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v6
         id: manuf
