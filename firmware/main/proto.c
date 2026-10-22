@@ -11,7 +11,9 @@
 #define PROTO_UART UART_NUM_0
 #define PROTO_RX_BUF 1024
 #define PROTO_TX_BUF 2048
-#define PROTO_LINE_MAX 160
+/* Long enough for the longest line, the CONNECT command, whose hex-encoded SSID
+ * and PSK fields can reach ~220 chars (see docs/PROTOCOL.md). */
+#define PROTO_LINE_MAX 256
 
 static SemaphoreHandle_t s_tx_lock;
 

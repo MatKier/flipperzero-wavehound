@@ -1,6 +1,7 @@
 #include "radio.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_event.h"
@@ -40,18 +41,23 @@ typedef enum {
     CMD_HUNT,
     CMD_SPECTRUM,
     CMD_DISCOVER,
+    CMD_CONNECT,
+    CMD_DISCONNECT,
     CMD_SLEEP,
 } radio_cmd_type_t;
 
 typedef struct {
     radio_cmd_type_t type;
-    uint8_t mac[6];
+    uint8_t mac[6]; /* hunt target, discover CLIENTS bssid, or connect bssid */
     uint8_t channel;
     radio_discover_filter_t filter;
     bool pinned;
     uint16_t hop_periods;  /* hunt: 0 = HUNT_HOP_PERIODS */
     uint16_t lost_periods; /* hunt: 0 = HUNT_LOST_PERIODS */
     uint16_t dwell_ms;     /* discover: 0 = DISCOVER_DWELL_MS */
+    bool has_bssid;        /* connect: mac[] holds a BSSID to lock onto */
+    char ssid[33];         /* connect: AP SSID */
+    char psk[64];          /* connect: AP passphrase ("" = open) */
 } radio_cmd_t;
 
 #define DEV_FLAG_AP 0x01         /* transmitted like an access point */
@@ -133,6 +139,19 @@ static uint32_t s_disc_dwell_ms = DISCOVER_DWELL_MS;
 static uint16_t s_disc_cursor;     /* table slots already examined */
 static uint16_t s_disc_streamed;   /* wanted DEV lines already sent */
 static uint16_t s_disc_prev_count; /* table size seen at the previous tick */
+
+/* Station-association state, driven by the WiFi/IP event handlers (which run in
+ * the default event loop task, not the radio task). While associated the AP
+ * pins our channel, so set_channel() must not call esp_wifi_set_channel() -- it
+ * would fail; the hunt and client scans simply ride the connection's channel. */
+static esp_netif_t *s_sta_netif;
+static volatile bool s_associated;      /* L2 link up: gates set_channel() */
+static volatile bool s_connecting;      /* connect requested, awaiting a result */
+static volatile bool s_got_ip;          /* DHCP lease obtained */
+static volatile bool s_suppress_down;   /* swallow one self-initiated STA_DISCONNECTED */
+static volatile uint8_t s_conn_channel; /* the AP's channel while associated */
+static char s_conn_ssid[33];            /* SSID we joined (for INFO) */
+static char s_conn_ip[16];              /* our IPv4 while connected (for INFO) */
 
 static uint32_t mac_hash(const uint8_t *mac)
 {
@@ -356,8 +375,66 @@ static void promisc_cb(void *buf, wifi_promiscuous_pkt_type_t type)
     portEXIT_CRITICAL(&s_mux);
 }
 
+/* Copy an SSID for a single-field INFO row: commas and control characters would
+ * break the "one message per line, value has no comma" convention. */
+static void conn_ssid_sanitized(char *dst, size_t dst_sz, const char *src)
+{
+    size_t i = 0;
+    for (; src[i] && i + 1 < dst_sz; i++) {
+        const unsigned char c = (unsigned char)src[i];
+        dst[i] = (c == ',' || c < 0x20 || c == 0x7f) ? '?' : (char)c;
+    }
+    dst[i] = '\0';
+}
+
+static void conn_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        const wifi_event_sta_connected_t *e = data;
+        s_conn_channel = e->channel;
+        s_associated = true;
+        proto_sendf("CONN,ASSOC,%02x:%02x:%02x:%02x:%02x:%02x,%u", e->bssid[0], e->bssid[1],
+                    e->bssid[2], e->bssid[3], e->bssid[4], e->bssid[5], e->channel);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *e = data;
+        s_associated = false;
+        s_got_ip = false;
+        s_conn_ip[0] = '\0';
+        if (s_suppress_down) {
+            s_suppress_down = false; /* our own teardown for a reconnect/disconnect */
+        } else if (s_connecting) {
+            s_connecting = false;
+            proto_sendf("CONN,FAIL,%d", e->reason); /* join failed before a lease */
+        } else {
+            proto_sendf("CONN,DOWN"); /* an established link dropped unexpectedly */
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        const ip_event_got_ip_t *e = data;
+        s_connecting = false;
+        s_got_ip = true;
+        char ip[16], gw[16], dns[16] = "0.0.0.0";
+        snprintf(ip, sizeof(ip), IPSTR, IP2STR(&e->ip_info.ip));
+        snprintf(gw, sizeof(gw), IPSTR, IP2STR(&e->ip_info.gw));
+        esp_netif_dns_info_t di;
+        if (s_sta_netif && esp_netif_get_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &di) == ESP_OK &&
+            di.ip.type == ESP_IPADDR_TYPE_V4) {
+            snprintf(dns, sizeof(dns), IPSTR, IP2STR(&di.ip.u_addr.ip4));
+        }
+        snprintf(s_conn_ip, sizeof(s_conn_ip), "%s", ip);
+        proto_sendf("CONN,GOTIP,%s,%s,%s", ip, gw, dns);
+    }
+}
+
 static void set_channel(uint8_t ch)
 {
+    if (s_associated) {
+        /* Associated: the connection owns the channel (the AP's). Calling
+         * esp_wifi_set_channel() now would fail, so just track the real channel
+         * for the H,<ch> reports and stay put -- a connected hunt never hops. */
+        s_channel = s_conn_channel;
+        return;
+    }
     s_channel = ch;
     esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
 }
@@ -554,6 +631,66 @@ static void discover_tick(void)
     }
 }
 
+static void connect_start(const radio_cmd_t *cmd)
+{
+    /* Associating and channel-controlled sniffing don't mix, and the app always
+     * connects from idle; drop any running scan first. */
+    set_mode(MODE_IDLE);
+    if (s_associated) {
+        /* Reconnecting from an active link: the disconnect it takes is ours, so
+         * suppress the STA_DISCONNECTED it raises (guaranteed while associated). */
+        s_suppress_down = true;
+        esp_wifi_disconnect();
+        s_associated = false;
+    }
+    conn_ssid_sanitized(s_conn_ssid, sizeof(s_conn_ssid), cmd->ssid);
+    s_conn_ip[0] = '\0';
+    s_got_ip = false;
+    s_connecting = true;
+
+    wifi_config_t wc = {0};
+    /* wc is zeroed; copy the bytes (a 32-byte SSID fills the field with no NUL,
+     * which is valid 802.11). */
+    memcpy(wc.sta.ssid, cmd->ssid, strnlen(cmd->ssid, sizeof(wc.sta.ssid)));
+    memcpy(wc.sta.password, cmd->psk, strnlen(cmd->psk, sizeof(wc.sta.password)));
+    if (cmd->has_bssid) {
+        memcpy(wc.sta.bssid, cmd->mac, 6);
+        wc.sta.bssid_set = true;
+    }
+    if (cmd->channel) {
+        wc.sta.channel = cmd->channel;
+    }
+    /* Accept any authmode including open: the default threshold would otherwise
+     * refuse an open AP. */
+    wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
+
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wc);
+    if (err == ESP_OK) {
+        err = esp_wifi_connect();
+    }
+    if (err != ESP_OK) {
+        s_connecting = false;
+        proto_sendf("CONN,FAIL,%d", err);
+    }
+}
+
+static void do_disconnect(void)
+{
+    /* Report exactly one CONN,DOWN here and swallow the forced event (only when
+     * we were associated, so a disconnect event is guaranteed and the flag can't
+     * leak to a later real drop). */
+    const bool had_link = s_associated;
+    s_connecting = false;
+    s_associated = false;
+    s_got_ip = false;
+    s_conn_ip[0] = '\0';
+    if (had_link) {
+        s_suppress_down = true;
+        esp_wifi_disconnect();
+    }
+    proto_sendf("CONN,DOWN");
+}
+
 static void radio_task(void *arg)
 {
     (void)arg;
@@ -577,6 +714,7 @@ static void radio_task(void *arg)
                 break;
             case CMD_SLEEP:
                 set_mode(MODE_IDLE);
+                do_disconnect(); /* drop the link on app exit */
                 led_set(0, 0, 0);
                 break;
             case CMD_HUNT:
@@ -587,6 +725,12 @@ static void radio_task(void *arg)
                 break;
             case CMD_DISCOVER:
                 discover_start(cmd.filter, cmd.channel, cmd.mac, cmd.dwell_ms);
+                break;
+            case CMD_CONNECT:
+                connect_start(&cmd);
+                break;
+            case CMD_DISCONNECT:
+                do_disconnect();
                 break;
             }
             continue;
@@ -615,7 +759,12 @@ void radio_init(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                        &conn_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                                        &conn_event_handler, NULL, NULL));
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init));
@@ -668,6 +817,33 @@ void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8
         memcpy(cmd.mac, bssid, 6); /* reused by discover_start as the CLIENTS target */
     }
     post(&cmd);
+}
+
+void radio_connect(const char *ssid, const char *psk, const uint8_t bssid[6], uint8_t channel)
+{
+    radio_cmd_t cmd = {.type = CMD_CONNECT, .channel = channel, .has_bssid = bssid != NULL};
+    snprintf(cmd.ssid, sizeof(cmd.ssid), "%s", ssid ? ssid : "");
+    snprintf(cmd.psk, sizeof(cmd.psk), "%s", psk ? psk : "");
+    if (bssid) {
+        memcpy(cmd.mac, bssid, 6);
+    }
+    post(&cmd);
+}
+
+void radio_disconnect(void)
+{
+    const radio_cmd_t cmd = {.type = CMD_DISCONNECT};
+    post(&cmd);
+}
+
+void radio_conn_summary(char *ssid, size_t ssid_sz, char *ip, size_t ip_sz)
+{
+    if (ssid && ssid_sz) {
+        snprintf(ssid, ssid_sz, "%s", (s_associated && s_conn_ssid[0]) ? s_conn_ssid : "-");
+    }
+    if (ip && ip_sz) {
+        snprintf(ip, ip_sz, "%s", (s_got_ip && s_conn_ip[0]) ? s_conn_ip : "-");
+    }
 }
 
 void radio_stop(void)
