@@ -2,8 +2,8 @@
 #
 # - push to any branch: build + package as a CI check. Runs can restore caches
 #   saved on their own branch or on the default branch (main); tag runs only the
-#   default branch's, so the large toolchain cache is saved there only. This
-#   week's manuf is saved on any branch.
+#   default branch's, so the large toolchain caches (ufbt, PlatformIO) are saved
+#   there only. This week's manuf is saved on any branch.
 # - v<fap_version> tag: build, package and publish the GitHub release.
 # - workflow_dispatch: same files as a build artifact, no release.
 name: Build and release
@@ -54,16 +54,21 @@ jobs:
         run: pip install -r .github/ci/requirements.txt
 
       # Wireshark updates manuf weekly and asks not to fetch it more often, so
-      # keep one copy per ISO week and download only on a miss. The toolchain key
-      # has the exact Python version (ESP-IDF's env in ~/.platformio is tied to it)
-      # and only the platform / platform_packages pins from platformio.ini, so
-      # other edits there don't throw away the ~3 GB cache.
+      # keep one copy per ISO week and download only on a miss.
+      # The two toolchains are cached separately, each keyed on its own pins, so
+      # bumping one doesn't throw away the other:
+      # - ufbt (~/.ufbt: ARM toolchain + SDK) on FLIPPER_SDK. ufbt brings its own
+      #   Python, so the runner's doesn't matter.
+      # - PlatformIO (~/.platformio) on the exact Python version (ESP-IDF's env in
+      #   there is tied to it) and only the platform / platform_packages pins from
+      #   platformio.ini, so other edits there don't throw the cache away.
       - name: Cache keys
         id: keys
         run: |
           echo "manuf=manuf-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+          echo "ufbt=ufbt-${{ runner.os }}-$FLIPPER_SDK" >> "$GITHUB_OUTPUT"
           pio=$(sed -nE 's/^(platform|platform_packages) *= *//p' firmware/platformio.ini | tr -s ' \n' '+' | sed 's/+$//')
-          echo "toolchains=toolchains-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$FLIPPER_SDK-$pio" >> "$GITHUB_OUTPUT"
+          echo "pio=pio-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$pio" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v6
         id: manuf
@@ -83,12 +88,16 @@ jobs:
           key: ${{ steps.keys.outputs.manuf }}
 
       - uses: actions/cache/restore@v6
-        id: toolchains
+        id: ufbt
         with:
-          path: |
-            ~/.platformio
-            ~/.ufbt
-          key: ${{ steps.keys.outputs.toolchains }}
+          path: ~/.ufbt
+          key: ${{ steps.keys.outputs.ufbt }}
+
+      - uses: actions/cache/restore@v6
+        id: pio
+        with:
+          path: ~/.platformio
+          key: ${{ steps.keys.outputs.pio }}
 
       - name: Build Flipper app
         run: |
@@ -96,16 +105,22 @@ jobs:
           ufbt update --hw-target f7 --url "https://update.flipperzero.one/builds/firmware/$FLIPPER_SDK/flipper-z-f7-sdk-$FLIPPER_SDK.zip"
           python3 build_app.py --manuf manuf
 
+      # Each toolchain is saved right after its own build succeeds, so a failing
+      # firmware build doesn't stop a fresh ufbt cache from being kept.
+      - uses: actions/cache/save@v6
+        if: env.SAVE_TOOLCHAINS == 'true' && steps.ufbt.outputs.cache-hit != 'true'
+        with:
+          path: ~/.ufbt
+          key: ${{ steps.keys.outputs.ufbt }}
+
       - name: Build board firmware
         run: pio run -d firmware
 
       - uses: actions/cache/save@v6
-        if: env.SAVE_TOOLCHAINS == 'true' && steps.toolchains.outputs.cache-hit != 'true'
+        if: env.SAVE_TOOLCHAINS == 'true' && steps.pio.outputs.cache-hit != 'true'
         with:
-          path: |
-            ~/.platformio
-            ~/.ufbt
-          key: ${{ steps.keys.outputs.toolchains }}
+          path: ~/.platformio
+          key: ${{ steps.keys.outputs.pio }}
 
       - name: Package
         run: python3 tools/package_release.py --manuf manuf.gz -o dist --notes release-notes.md
