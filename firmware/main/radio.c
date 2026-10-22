@@ -14,6 +14,7 @@
 #include "sdkconfig.h"
 
 #include "led.h"
+#include "net_discover.h"
 #include "proto.h"
 
 #define HUNT_PERIOD_MS RADIO_HUNT_PERIOD_MS
@@ -391,20 +392,6 @@ static void conn_ssid_sanitized(char *dst, size_t dst_sz, const char *src)
     dst[i] = '\0';
 }
 
-/* Hex-encode `len` bytes of `src` into `out` (lowercase, NUL-terminated). Used
- * for the SSID/PSK the board hands back after WPS, which may hold any byte. */
-static void hex_encode(const char *src, size_t len, char *out, size_t out_sz)
-{
-    static const char digits[] = "0123456789abcdef";
-    size_t n = 0;
-    for (size_t i = 0; i < len && n + 2 < out_sz; i++) {
-        const uint8_t b = (uint8_t)src[i];
-        out[n++] = digits[b >> 4];
-        out[n++] = digits[b & 0x0f];
-    }
-    out[n] = '\0';
-}
-
 /* WPS succeeded: pull the SSID/passphrase (from the event, or -- the single-AP
  * case where the driver set them and passes no data -- back out of the stored
  * config), report them for saving, and associate. Runs in the event task. */
@@ -436,8 +423,8 @@ static void wps_success(const wifi_event_sta_wps_er_success_t *e)
     }
 
     char ssid_hex[2 * 32 + 1], psk_hex[2 * 64 + 1];
-    hex_encode(ssid, strlen(ssid), ssid_hex, sizeof(ssid_hex));
-    hex_encode(psk, strlen(psk), psk_hex, sizeof(psk_hex));
+    proto_hex_encode(ssid, strlen(ssid), ssid_hex, sizeof(ssid_hex));
+    proto_hex_encode(psk, strlen(psk), psk_hex, sizeof(psk_hex));
     conn_ssid_sanitized(s_conn_ssid, sizeof(s_conn_ssid), ssid);
     s_conn_ip[0] = '\0';
     s_got_ip = false;
@@ -456,13 +443,17 @@ static void conn_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         char ip[16], gw[16], dns[16] = "0.0.0.0";
         snprintf(ip, sizeof(ip), IPSTR, IP2STR(&e->ip_info.ip));
         snprintf(gw, sizeof(gw), IPSTR, IP2STR(&e->ip_info.gw));
+        uint32_t dns_net = 0;
         esp_netif_dns_info_t di;
         if (s_sta_netif && esp_netif_get_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &di) == ESP_OK &&
             di.ip.type == ESP_IPADDR_TYPE_V4) {
+            dns_net = di.ip.u_addr.ip4.addr;
             snprintf(dns, sizeof(dns), IPSTR, IP2STR(&di.ip.u_addr.ip4));
         }
         snprintf(s_conn_ip, sizeof(s_conn_ip), "%s", ip);
         proto_sendf("CONN,GOTIP,%s,%s,%s", ip, gw, dns);
+        /* Learn which hosts (and their names) live on this subnet. */
+        net_discover_on_gotip(s_sta_netif, e->ip_info.ip.addr, e->ip_info.netmask.addr, dns_net);
         return;
     }
     if (base != WIFI_EVENT) {
@@ -489,6 +480,7 @@ static void conn_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         s_associated = false;
         s_got_ip = false;
         s_conn_ip[0] = '\0';
+        net_discover_on_down();
         if (s_suppress_down) {
             s_suppress_down = false; /* our own teardown for a reconnect/disconnect */
         } else if (s_connecting) {
@@ -672,6 +664,9 @@ static void discover_start(radio_discover_filter_t filter, uint8_t channel, cons
     led_set(40, 0, 60);
     set_channel(channel ? channel : 1);
     set_mode(MODE_DISCOVER);
+    if (s_associated) {
+        net_discover_rescan(); /* refresh host IPs for the list being opened */
+    }
 }
 
 static void discover_emit_one(const discover_dev_t *d)
@@ -784,6 +779,7 @@ static void do_disconnect(void)
     s_associated = false;
     s_got_ip = false;
     s_conn_ip[0] = '\0';
+    net_discover_on_down();
     if (had_link) {
         s_suppress_down = true;
         esp_wifi_disconnect();
@@ -926,6 +922,8 @@ void radio_init(void)
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(promisc_cb));
+
+    net_discover_init();
 
     s_cmd_queue = xQueueCreate(4, sizeof(radio_cmd_t));
     xTaskCreate(radio_task, "radio", 4096, NULL, 5, NULL);

@@ -54,6 +54,18 @@ void proto_sendf(const char *fmt, ...)
     xSemaphoreGive(s_tx_lock);
 }
 
+void proto_hex_encode(const char *src, size_t len, char *out, size_t out_sz)
+{
+    static const char digits[] = "0123456789abcdef";
+    size_t n = 0;
+    for (size_t i = 0; i < len && n + 2 < out_sz; i++) {
+        const unsigned char b = (unsigned char)src[i];
+        out[n++] = digits[b >> 4];
+        out[n++] = digits[b & 0x0f];
+    }
+    out[n] = '\0';
+}
+
 size_t proto_read_line(char *buf, size_t size)
 {
     size_t len = 0;

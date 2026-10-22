@@ -61,6 +61,7 @@ put `PIN` before any token.
 | `DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid>` | One transmitter, streamed once in discovery order as it is first heard (max 96; the board tracks up to 192). `rssi` is the strongest frame heard. `flags` is an unordered set of single-char codes: `A` access point (sent beacons) or `S` station; `R` if the MAC is locally administered (randomized); and, for an AP whose beacon was parsed, one security code (`o` open, `w` WEP, `1` WPA, `2` WPA2, `3` WPA3) and one PHY code (`g` 802.11b/g, `n` 802.11n, `c` 802.11ac, `x` 802.11ax). Security and PHY codes are absent for stations and for older firmware; readers must match codes individually, not by position. `ssid` (rest of line) is only set for access points. For APs, `ch` comes from the beacon's DS parameter set. |
 | `CONN,<state>[,...]`                           | Station-association progress (v9+). See [Association](#association). |
 | `WPS,<state>[,...]`                            | WPS push-button progress (v10+). See [WPS](#wps). |
+| `IP,<mac>,<ip>[,<host_hex>]`                   | A host found on the associated subnet (v11+): its MAC, IPv4, and — once a best-effort lookup finds one — its [hex-encoded](#hex-encoded-fields) hostname. Streamed as an ARP sweep learns hosts; the IP is sent first and the same line is re-sent with a hostname if one is resolved. The app matches by `<mac>` to annotate list/hunt rows. See [Host discovery](#host-discovery). |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Commit, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Assoc, IP, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `Firmware` is the board firmware version (the same value carried by `READY`/`PONG`); `Commit` is the build system's version string (`git describe` for a git checkout, else `version.txt`/`PROJECT_VER`). `Assoc` is the SSID the board is associated with (`-` when not), `IP` its DHCP lease (`-` when none). `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |
 | `INFO_END`                                     | End of an `INFO` reply.               |
@@ -114,5 +115,18 @@ credentials without typing them (acknowledged with `OK,WPS`). Progress:
 
 WPS needs sniffer mode off, so it only runs from idle; starting any scan or
 `CONNECT` while it is armed cancels it.
+
+### Host discovery
+
+Once associated and holding a lease, the board sweeps its subnet with ARP to map
+each host's MAC to an IPv4, and streams an `IP,<mac>,<ip>` line per host found.
+It then makes a best-effort hostname attempt — reverse DNS (a PTR query to the
+AP's DNS server), falling back to NBNS (a NetBIOS node-status query to the host)
+— and, when one resolves, re-sends the line as `IP,<mac>,<ip>,<host_hex>`. Many
+consumer networks return no name; the IP is always provided. The app keys on
+`<mac>` to show IPs/names against the clients it already lists and the target it
+hunts. A fresh sweep runs when a client scan starts, so the list stays current.
+Reverse DNS/NBNS and the ARP table are all handled on the board; the Flipper
+only consumes the `IP` lines.
 
 SSIDs are sanitized: control characters become `?`, so every message stays on one line.
