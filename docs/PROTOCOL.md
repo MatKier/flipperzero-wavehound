@@ -15,6 +15,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). Optional [timing token](#timing-tokens) `DWELL` (after `<bssid>` for `CLIENTS`, else after `<ch>`) sets the per-channel dwell when hopping (default 120 ms); `DEV` lines are also streamed at that cadence. |
 | `CONNECT,<ssid_hex>,<psk_hex>[,<bssid>][,<ch>]` | Associate with an access point in station mode (v9+). `<ssid_hex>` and `<psk_hex>` are the SSID and passphrase [hex-encoded](#hex-encoded-fields); an empty `<psk_hex>` joins an open network. The optional `<bssid>` (a MAC) and `<ch>` (1-13) pin and speed up the join and may appear in either order. Promiscuous RX stays live, so a hunt keeps sampling on the AP's channel. Progress is reported as [`CONN,...`](#association) lines. |
 | `DISCONNECT`          | Drop the association and return to pure receive-only sniffing. Answered with `CONN,DOWN`. |
+| `WPS` / `WPS,STOP`    | Start / cancel WPS push-button (PBC) enrolment (v10+). On success the board reports the negotiated credentials ([`WPS,OK,...`](#wps)) and associates; `WPS,STOP` cancels an armed exchange. |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
 | `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. The idle LED stays lit (blue). |
 | `SLEEP`               | Like `STOP`, but also turn the LED off (dark idle). The app sends this on exit, since the board stays powered on the Flipper's always-on 3V3 rail. |
@@ -59,6 +60,7 @@ put `PIN` before any token.
 | `DISCOVER_BEGIN,<filter>,<ch>`                 | Search started (`ch` 0 = hopping).    |
 | `DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid>` | One transmitter, streamed once in discovery order as it is first heard (max 96; the board tracks up to 192). `rssi` is the strongest frame heard. `flags` is an unordered set of single-char codes: `A` access point (sent beacons) or `S` station; `R` if the MAC is locally administered (randomized); and, for an AP whose beacon was parsed, one security code (`o` open, `w` WEP, `1` WPA, `2` WPA2, `3` WPA3) and one PHY code (`g` 802.11b/g, `n` 802.11n, `c` 802.11ac, `x` 802.11ax). Security and PHY codes are absent for stations and for older firmware; readers must match codes individually, not by position. `ssid` (rest of line) is only set for access points. For APs, `ch` comes from the beacon's DS parameter set. |
 | `CONN,<state>[,...]`                           | Station-association progress (v9+). See [Association](#association). |
+| `WPS,<state>[,...]`                            | WPS push-button progress (v10+). See [WPS](#wps). |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Commit, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Assoc, IP, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `Firmware` is the board firmware version (the same value carried by `READY`/`PONG`); `Commit` is the build system's version string (`git describe` for a git checkout, else `version.txt`/`PROJECT_VER`). `Assoc` is the SSID the board is associated with (`-` when not), `IP` its DHCP lease (`-` when none). `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |
 | `INFO_END`                                     | End of an `INFO` reply.               |
@@ -98,5 +100,19 @@ Progress is reported as `CONN,<state>` lines:
 `CONNECT` is also acknowledged with `OK,CONNECT` as soon as the arguments parse;
 the `CONN,...` lines follow asynchronously. `SLEEP` disconnects as well; `STOP`
 does **not** (so the link survives moving from a client scan into a hunt).
+
+### WPS
+
+`WPS` runs WPS push-button (PBC) enrolment so the board can learn an AP's
+credentials without typing them (acknowledged with `OK,WPS`). Progress:
+
+| Line | Meaning |
+|------|---------|
+| `WPS,ACTIVE`                    | Enrolment armed — press the WPS button on the router (times out after ~120 s). |
+| `WPS,OK,<ssid_hex>,<psk_hex>`   | Credentials negotiated ([hex-encoded](#hex-encoded-fields)) — the board then auto-associates, so the usual `CONN,ASSOC`/`CONN,GOTIP` lines follow. The app may offer to save `<ssid>`/`<psk>`. `<psk_hex>` can be empty if the Wi-Fi stack did not surface it; the join still succeeds. |
+| `WPS,FAIL,<reason>`             | Enrolment failed (`<reason>` is the driver's numeric WPS fail reason), timed out (`timeout`) or was cancelled (`cancelled`). |
+
+WPS needs sniffer mode off, so it only runs from idle; starting any scan or
+`CONNECT` while it is armed cancels it.
 
 SSIDs are sanitized: control characters become `?`, so every message stays on one line.

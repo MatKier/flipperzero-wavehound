@@ -7,6 +7,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_wps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -43,6 +44,8 @@ typedef enum {
     CMD_DISCOVER,
     CMD_CONNECT,
     CMD_DISCONNECT,
+    CMD_WPS_START,
+    CMD_WPS_STOP,
     CMD_SLEEP,
 } radio_cmd_type_t;
 
@@ -149,6 +152,7 @@ static volatile bool s_associated;      /* L2 link up: gates set_channel() */
 static volatile bool s_connecting;      /* connect requested, awaiting a result */
 static volatile bool s_got_ip;          /* DHCP lease obtained */
 static volatile bool s_suppress_down;   /* swallow one self-initiated STA_DISCONNECTED */
+static volatile bool s_wps_active;      /* a WPS PBC exchange is in progress */
 static volatile uint8_t s_conn_channel; /* the AP's channel while associated */
 static char s_conn_ssid[33];            /* SSID we joined (for INFO) */
 static char s_conn_ip[16];              /* our IPv4 while connected (for INFO) */
@@ -387,29 +391,65 @@ static void conn_ssid_sanitized(char *dst, size_t dst_sz, const char *src)
     dst[i] = '\0';
 }
 
+/* Hex-encode `len` bytes of `src` into `out` (lowercase, NUL-terminated). Used
+ * for the SSID/PSK the board hands back after WPS, which may hold any byte. */
+static void hex_encode(const char *src, size_t len, char *out, size_t out_sz)
+{
+    static const char digits[] = "0123456789abcdef";
+    size_t n = 0;
+    for (size_t i = 0; i < len && n + 2 < out_sz; i++) {
+        const uint8_t b = (uint8_t)src[i];
+        out[n++] = digits[b >> 4];
+        out[n++] = digits[b & 0x0f];
+    }
+    out[n] = '\0';
+}
+
+/* WPS succeeded: pull the SSID/passphrase (from the event, or -- the single-AP
+ * case where the driver set them and passes no data -- back out of the stored
+ * config), report them for saving, and associate. Runs in the event task. */
+static void wps_success(const wifi_event_sta_wps_er_success_t *e)
+{
+    esp_wifi_wps_disable();
+    s_wps_active = false;
+
+    char ssid[33] = {0};
+    char psk[65] = {0};
+    if (e && e->ap_cred_cnt >= 1) {
+        const size_t sl = strnlen((const char *)e->ap_cred[0].ssid, sizeof(e->ap_cred[0].ssid));
+        const size_t pl =
+            strnlen((const char *)e->ap_cred[0].passphrase, sizeof(e->ap_cred[0].passphrase));
+        memcpy(ssid, e->ap_cred[0].ssid, sl);
+        memcpy(psk, e->ap_cred[0].passphrase, pl);
+        wifi_config_t wc = {0};
+        memcpy(wc.sta.ssid, e->ap_cred[0].ssid, sl);
+        memcpy(wc.sta.password, e->ap_cred[0].passphrase, pl);
+        wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
+        esp_wifi_set_config(WIFI_IF_STA, &wc);
+    } else {
+        wifi_config_t wc = {0};
+        if (esp_wifi_get_config(WIFI_IF_STA, &wc) == ESP_OK) {
+            memcpy(ssid, wc.sta.ssid, strnlen((const char *)wc.sta.ssid, sizeof(wc.sta.ssid)));
+            memcpy(psk, wc.sta.password,
+                   strnlen((const char *)wc.sta.password, sizeof(wc.sta.password)));
+        }
+    }
+
+    char ssid_hex[2 * 32 + 1], psk_hex[2 * 64 + 1];
+    hex_encode(ssid, strlen(ssid), ssid_hex, sizeof(ssid_hex));
+    hex_encode(psk, strlen(psk), psk_hex, sizeof(psk_hex));
+    conn_ssid_sanitized(s_conn_ssid, sizeof(s_conn_ssid), ssid);
+    s_conn_ip[0] = '\0';
+    s_got_ip = false;
+    s_connecting = true;
+    proto_sendf("WPS,OK,%s,%s", ssid_hex, psk_hex);
+    esp_wifi_connect(); /* CONN,ASSOC / CONN,GOTIP follow */
+}
+
 static void conn_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
-        const wifi_event_sta_connected_t *e = data;
-        s_conn_channel = e->channel;
-        s_associated = true;
-        proto_sendf("CONN,ASSOC,%02x:%02x:%02x:%02x:%02x:%02x,%u", e->bssid[0], e->bssid[1],
-                    e->bssid[2], e->bssid[3], e->bssid[4], e->bssid[5], e->channel);
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        const wifi_event_sta_disconnected_t *e = data;
-        s_associated = false;
-        s_got_ip = false;
-        s_conn_ip[0] = '\0';
-        if (s_suppress_down) {
-            s_suppress_down = false; /* our own teardown for a reconnect/disconnect */
-        } else if (s_connecting) {
-            s_connecting = false;
-            proto_sendf("CONN,FAIL,%d", e->reason); /* join failed before a lease */
-        } else {
-            proto_sendf("CONN,DOWN"); /* an established link dropped unexpectedly */
-        }
-    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+    if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = data;
         s_connecting = false;
         s_got_ip = true;
@@ -423,6 +463,59 @@ static void conn_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         }
         snprintf(s_conn_ip, sizeof(s_conn_ip), "%s", ip);
         proto_sendf("CONN,GOTIP,%s,%s,%s", ip, gw, dns);
+        return;
+    }
+    if (base != WIFI_EVENT) {
+        return;
+    }
+
+    switch (id) {
+    case WIFI_EVENT_STA_CONNECTED: {
+        if (s_wps_active) {
+            break; /* WPS runs its own associate/deauth handshake */
+        }
+        const wifi_event_sta_connected_t *e = data;
+        s_conn_channel = e->channel;
+        s_associated = true;
+        proto_sendf("CONN,ASSOC,%02x:%02x:%02x:%02x:%02x:%02x,%u", e->bssid[0], e->bssid[1],
+                    e->bssid[2], e->bssid[3], e->bssid[4], e->bssid[5], e->channel);
+        break;
+    }
+    case WIFI_EVENT_STA_DISCONNECTED: {
+        if (s_wps_active) {
+            break;
+        }
+        const wifi_event_sta_disconnected_t *e = data;
+        s_associated = false;
+        s_got_ip = false;
+        s_conn_ip[0] = '\0';
+        if (s_suppress_down) {
+            s_suppress_down = false; /* our own teardown for a reconnect/disconnect */
+        } else if (s_connecting) {
+            s_connecting = false;
+            proto_sendf("CONN,FAIL,%d", e->reason); /* join failed before a lease */
+        } else {
+            proto_sendf("CONN,DOWN"); /* an established link dropped unexpectedly */
+        }
+        break;
+    }
+    case WIFI_EVENT_STA_WPS_ER_SUCCESS:
+        wps_success(data);
+        break;
+    case WIFI_EVENT_STA_WPS_ER_FAILED: {
+        esp_wifi_wps_disable();
+        s_wps_active = false;
+        const wifi_event_sta_wps_fail_reason_t *r = data;
+        proto_sendf("WPS,FAIL,%d", r ? (int)*r : -1);
+        break;
+    }
+    case WIFI_EVENT_STA_WPS_ER_TIMEOUT:
+        esp_wifi_wps_disable();
+        s_wps_active = false;
+        proto_sendf("WPS,FAIL,timeout");
+        break;
+    default:
+        break;
     }
 }
 
@@ -446,6 +539,13 @@ static uint8_t next_channel(uint8_t ch)
 
 static void set_mode(radio_mode_t mode)
 {
+    if (s_wps_active) {
+        /* Promiscuous and WPS can't coexist; a new scan/connect ends WPS. The
+         * explicit cancel path (wps_stop) is what reports WPS,FAIL. */
+        esp_wifi_wps_disable();
+        s_wps_active = false;
+    }
+
     portENTER_CRITICAL(&s_mux);
     s_mode = mode;
     memset(&s_hunt, 0, sizeof(s_hunt));
@@ -691,6 +791,41 @@ static void do_disconnect(void)
     proto_sendf("CONN,DOWN");
 }
 
+static void wps_start(void)
+{
+    /* WPS refuses to start with sniffer mode on, and we connect from idle. */
+    set_mode(MODE_IDLE);
+    if (s_associated) {
+        s_suppress_down = true;
+        esp_wifi_disconnect();
+        s_associated = false;
+    }
+    s_connecting = false;
+
+    esp_wps_config_t cfg = WPS_CONFIG_INIT_DEFAULT(WPS_TYPE_PBC);
+    esp_err_t err = esp_wifi_wps_enable(&cfg);
+    if (err == ESP_OK) {
+        err = esp_wifi_wps_start(); /* uses the default ~120 s enrolment window */
+    }
+    if (err != ESP_OK) {
+        esp_wifi_wps_disable();
+        s_wps_active = false;
+        proto_sendf("WPS,FAIL,%d", err);
+        return;
+    }
+    s_wps_active = true;
+    proto_sendf("WPS,ACTIVE"); /* now press WPS on the router */
+}
+
+static void wps_stop(void)
+{
+    if (s_wps_active) {
+        esp_wifi_wps_disable();
+        s_wps_active = false;
+        proto_sendf("WPS,FAIL,cancelled");
+    }
+}
+
 static void radio_task(void *arg)
 {
     (void)arg;
@@ -731,6 +866,12 @@ static void radio_task(void *arg)
                 break;
             case CMD_DISCONNECT:
                 do_disconnect();
+                break;
+            case CMD_WPS_START:
+                wps_start();
+                break;
+            case CMD_WPS_STOP:
+                wps_stop();
                 break;
             }
             continue;
@@ -833,6 +974,18 @@ void radio_connect(const char *ssid, const char *psk, const uint8_t bssid[6], ui
 void radio_disconnect(void)
 {
     const radio_cmd_t cmd = {.type = CMD_DISCONNECT};
+    post(&cmd);
+}
+
+void radio_wps_start(void)
+{
+    const radio_cmd_t cmd = {.type = CMD_WPS_START};
+    post(&cmd);
+}
+
+void radio_wps_stop(void)
+{
+    const radio_cmd_t cmd = {.type = CMD_WPS_STOP};
     post(&cmd);
 }
 

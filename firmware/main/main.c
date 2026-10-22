@@ -228,6 +228,17 @@ static void handle_connect(char *args)
     radio_connect(ssid, psk, has_bssid ? bssid : NULL, (uint8_t)ch);
 }
 
+static void handle_wps(char *args)
+{
+    /* "WPS" starts PBC enrolment; "WPS,STOP" cancels it. */
+    if (args && strcasecmp(args, "STOP") == 0) {
+        radio_wps_stop();
+    } else {
+        radio_wps_start();
+    }
+    proto_sendf("OK,WPS");
+}
+
 static void handle_line(char *line)
 {
     char *args = strchr(line, ',');
@@ -252,6 +263,8 @@ static void handle_line(char *line)
     } else if (strcmp(line, "DISCONNECT") == 0) {
         radio_disconnect();
         proto_sendf("OK,DISCONNECT");
+    } else if (strcmp(line, "WPS") == 0) {
+        handle_wps(args);
     } else if (strcmp(line, "INFO") == 0) {
         info_report();
     } else if (strcmp(line, "STOP") == 0) {

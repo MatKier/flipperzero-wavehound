@@ -54,6 +54,16 @@ void radio_connect(const char *ssid, const char *psk, const uint8_t bssid[6], ui
 void radio_disconnect(void);
 
 /**
+ * Start WPS push-button (PBC) enrolment. Reports `WPS,ACTIVE` when armed (press
+ * WPS on the router), then `WPS,OK,<ssid_hex>,<psk_hex>` with the negotiated
+ * credentials and auto-associates (CONN,... follows), or `WPS,FAIL,<reason>`.
+ */
+void radio_wps_start(void);
+
+/** Cancel an in-progress WPS enrolment. */
+void radio_wps_stop(void);
+
+/**
  * Fill short association / IPv4 strings for the INFO block. Each is set to "-"
  * when not associated or without a lease yet. `ssid` should hold >= 33 bytes and
  * `ip` >= 16; either pointer may be NULL to skip it.
