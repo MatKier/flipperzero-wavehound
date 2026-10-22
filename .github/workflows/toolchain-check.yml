@@ -1,0 +1,138 @@
+# Weekly check for new releases of the two toolchain pins Dependabot can't see
+# (they're version strings, not packages it knows), opening one issue per new
+# version. Bumping stays a manual decision for both:
+# - Flipper SDK (FLIPPER_SDK in release.yml), against the release channel ufbt
+#   uses; the issue says whether the API changed, since a newer API can stop
+#   the .fap loading on older firmware.
+# - espressif32 PlatformIO platform (platformio.ini), against PlatformIO's
+#   registry; a new one brings a new ESP-IDF / bootloader and needs a board test.
+name: Toolchain update check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  flipper-sdk:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare pinned SDK with the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          index=https://update.flipperzero.one/firmware/directory.json
+          pinned=$(sed -nE 's/^ *FLIPPER_SDK: *"([^"]+)".*/\1/p' .github/workflows/release.yml)
+          [ -n "$pinned" ] || { echo "::error::FLIPPER_SDK not found in release.yml"; exit 1; }
+
+          release=$(curl -fsSL "$index" | jq -c '.channels[] | select(.id == "release") | .versions[0]')
+          latest=$(jq -r .version <<<"$release")
+          latest_url=$(jq -r '.files[] | select(.type == "sdk_zip" and .target == "f7") | .url' <<<"$release")
+          echo "pinned $pinned, latest release $latest"
+          if [ "$latest" = "$pinned" ]; then
+            exit 0
+          fi
+
+          title="Flipper SDK $latest released (building against $pinned)"
+          if gh issue list --state all --limit 200 --json title \
+               | jq -e --arg t "$title" 'any(.[]; .title == $t)' >/dev/null; then
+            echo "issue already exists: $title"
+            exit 0
+          fi
+
+          # API version as the SDK itself declares it (same file package_release.py reads).
+          api() {
+            curl -fsSL -o sdk.zip "$1" && unzip -p sdk.zip '*/targets/f7/api_symbols.csv' \
+              | sed -nE 's/^Version,\+,([^,]+).*/\1/p'
+          }
+          old_api=$(api "https://update.flipperzero.one/builds/firmware/$pinned/flipper-z-f7-sdk-$pinned.zip")
+          new_api=$(api "$latest_url")
+          # The firmware loads a .fap if the API major matches and its minor is >= the .fap's.
+          if [ "$old_api" = "$new_api" ]; then
+            impact="API unchanged ($new_api): bumping doesn't change which firmware can load the app."
+          elif [ "${old_api%%.*}" = "${new_api%%.*}" ]; then
+            impact="Same API major, newer minor ($old_api -> $new_api): a .fap built against $latest no longer loads on firmware below API $new_api (e.g. $pinned). Only worth it if you need something new in the API."
+          else
+            impact="**New API major ($old_api -> $new_api).** A .fap built against $latest won't load on firmware with API ${old_api%%.*}.x (e.g. $pinned), and the app may need code changes to build."
+          fi
+
+          gh issue create --title "$title" --body "$(cat <<EOF
+          Flipper firmware **$latest** is on the release channel; releases are built against SDK **$pinned**.
+
+          $impact
+
+          To move to it:
+          - set \`FLIPPER_SDK\` in \`.github/workflows/release.yml\` to \`$latest\`
+          - update "Built against official firmware SDK ..." in \`README.md\`
+          - build and test the app on a Flipper running $latest
+
+          Opened by \`.github/workflows/toolchain-check.yml\`; close it to dismiss this version.
+          EOF
+          )"
+
+  espressif32:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare pinned espressif32 platform with the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pinned=$(sed -nE 's/^platform *= *espressif32@([^ ;]+).*/\1/p' firmware/platformio.ini)
+          [ -n "$pinned" ] || { echo "::error::espressif32@<version> not found in platformio.ini"; exit 1; }
+
+          latest=$(curl -fsSL https://api.registry.platformio.org/v3/packages/platformio/platform/espressif32 \
+            | jq -r .version.name)
+          echo "pinned $pinned, latest release $latest"
+          newest=$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n1)
+          if [ "$latest" = "$pinned" ] || [ "$newest" = "$pinned" ]; then
+            exit 0
+          fi
+
+          title="PlatformIO espressif32 $latest released (building with $pinned)"
+          if gh issue list --state all --limit 200 --json title \
+               | jq -e --arg t "$title" 'any(.[]; .title == $t)' >/dev/null; then
+            echo "issue already exists: $title"
+            exit 0
+          fi
+
+          # ESP-IDF a platform version ships: its platform.json requires
+          # framework-espidf ~4.MMmmpp, which PlatformIO encodes as ESP-IDF MM.mm.pp.
+          idf() {
+            curl -fsSL "https://raw.githubusercontent.com/platformio/platform-espressif32/v$1/platform.json" \
+              | jq -r '.packages["framework-espidf"].version' \
+              | sed -nE 's/^[~^]?[0-9]+\.([0-9]+)([0-9]{2})([0-9]{2})\..*/\1 \2 \3/p' \
+              | { read -r a b c && echo "$a.$((10#$b)).$((10#$c))"; } || echo "unknown"
+          }
+          old_idf=$(idf "$pinned")
+          new_idf=$(idf "$latest")
+          if [ "$old_idf" = "$new_idf" ]; then
+            impact="Same ESP-IDF ($new_idf): platform-level changes only (build scripts, tool packages)."
+          else
+            impact="**ESP-IDF $old_idf -> $new_idf.** New bootloader and Wi-Fi/system libraries; check the board still behaves, and that the release's license list still matches."
+          fi
+
+          gh issue create --title "$title" --body "$(cat <<EOF
+          PlatformIO's **espressif32 $latest** platform is out; the board firmware is built with **$pinned**.
+          Release notes: https://github.com/platformio/platform-espressif32/releases/tag/v$latest
+
+          $impact
+
+          To move to it:
+          - set \`platform = espressif32@$latest\` in \`firmware/platformio.ini\` and update the comment above it (platform -> framework-espidf -> ESP-IDF)
+          - update "Verified building with PlatformIO + ESP-IDF ..." in \`README.md\` if ESP-IDF changed
+          - if the release build fails in \`tools/package_release.py\`, update \`LICENSES\` there and the table in \`THIRD_PARTY_NOTICES.md\`
+          - flash the board and test hunt / discover / spectrum
+
+          Opened by \`.github/workflows/toolchain-check.yml\`; close it to dismiss this version.
+          EOF
+          )"
