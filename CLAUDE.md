@@ -125,8 +125,9 @@ Pushing the tag runs `.github/workflows/release.yml`, which builds both sides
 and publishes the GitHub release (it fails if the tag isn't `v<fap_version>`
 or `changelog.md` has no `## v<fap_version>` entry; the entry becomes the
 release notes). The same workflow builds every branch push as a CI check.
-The toolchain cache is saved on `main` only, because tag runs can only restore
-caches saved on `main`; the weekly Wireshark `manuf` is cached per branch too. If an
+The toolchain caches (ufbt and PlatformIO, keyed separately) are saved on
+`main` only, because tag runs can only restore caches saved on `main`; the
+weekly Wireshark `manuf` is cached per branch too. If an
 ESP-IDF/platform bump moves or adds linked components, update `LICENSES` in
 `tools/package_release.py` and the table in `THIRD_PARTY_NOTICES.md`.
 
