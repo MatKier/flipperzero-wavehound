@@ -2,7 +2,8 @@
 #
 # - push to any branch: build + package as a CI check. Runs can restore caches
 #   saved on their own branch or on the default branch (main); tag runs only the
-#   default branch's, so the large toolchain cache is saved there only. This week's manuf is saved on any branch.
+#   default branch's, so the large toolchain cache is saved there only. This
+#   week's manuf is saved on any branch.
 # - v<fap_version> tag: build, package and publish the GitHub release.
 # - workflow_dispatch: same files as a build artifact, no release.
 name: Build and release
