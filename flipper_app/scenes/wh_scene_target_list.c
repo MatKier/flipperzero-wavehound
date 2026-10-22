@@ -198,17 +198,24 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     if(!picked) return false;
 
     if(app->picking_ap_channel) {
+        app->picking_ap_channel = false;
         if(app->channel_purpose == WhChannelForDeviceSearch) {
             /* Device search scoped to this AP: list the stations associated with
              * it, on its channel. The next scan reads clients_ap. */
             app->clients_ap = picked_target;
             app->device_search_clients = true;
+            /* Offer to log in to the AP first (so a silent client can later be
+             * elicited); only when the board firmware supports it. The login
+             * flow continues to the client list via wh_ap_login_proceed(). */
+            if(app->board_fw_version >= WH_FW_LOGIN_MIN) {
+                scene_manager_next_scene(app->scene_manager, WhSceneApLogin);
+                return true;
+            }
         } else {
             /* MAC hunt only needs the channel number to pin the typed MAC. */
             app->target.channel = picked_target.channel;
             app->target.pin_channel = true;
         }
-        app->picking_ap_channel = false;
         app->channel_pick_pending = true;
         scene_manager_search_and_switch_to_previous_scene(
             app->scene_manager, WhSceneChannelSelect);

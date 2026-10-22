@@ -6,6 +6,7 @@
  * strength; the Flipper turns it into a meter, a graph and Geiger clicks.
  */
 #include "wavehound_i.h"
+#include "wh_ap_store.h"
 #include "wh_store.h"
 
 #include <furi_hal.h>
@@ -37,6 +38,67 @@ bool wh_parse_mac(const char* str, uint8_t mac[6]) {
         mac[i] = (uint8_t)(hi << 4 | lo);
     }
     return true;
+}
+
+/* Hex-encode a C string (lowercase, NUL-terminated); matches the board's
+ * proto_hex_encode so free-text fields survive the comma-separated protocol. */
+static void wh_hex_encode(const char* src, char* out, size_t out_sz) {
+    static const char digits[] = "0123456789abcdef";
+    size_t n = 0;
+    for(const unsigned char* p = (const unsigned char*)src; *p && n + 2 < out_sz; p++) {
+        out[n++] = digits[*p >> 4];
+        out[n++] = digits[*p & 0x0f];
+    }
+    out[n] = '\0';
+}
+
+/* Decode an even-length hex string into out (NUL-terminated). Returns the byte
+ * count, or -1 on malformed/oversized input. */
+static int wh_hex_decode(const char* s, char* out, size_t out_sz) {
+    size_t n = 0;
+    while(s && s[0]) {
+        int hi = hex_nibble(s[0]);
+        int lo = hex_nibble(s[1]); /* s[1] may be the NUL terminator */
+        if(hi < 0 || lo < 0) return -1;
+        if(n + 1 >= out_sz) return -1;
+        out[n++] = (char)(hi << 4 | lo);
+        s += 2;
+    }
+    out[n] = '\0';
+    return (int)n;
+}
+
+void wh_ap_connect(WavehoundApp* app) {
+    char ssid_hex[2 * WH_AP_SSID_MAX];
+    char psk_hex[2 * WH_AP_PSK_MAX];
+    wh_hex_encode(app->clients_ap.name, ssid_hex, sizeof(ssid_hex));
+    wh_hex_encode(app->psk_buf, psk_hex, sizeof(psk_hex));
+
+    app->conn.connecting = true;
+    app->conn.connected = false;
+    app->conn.fail_reason = 0;
+    strlcpy(app->conn.ssid, app->clients_ap.name, sizeof(app->conn.ssid));
+
+    /* CONNECT,<ssid_hex>,<psk_hex>,<bssid>,<ch> -- pass the AP's BSSID/channel so
+     * the join is quick and unambiguous. */
+    char cmd[2 * WH_AP_SSID_MAX + 2 * WH_AP_PSK_MAX + 40];
+    snprintf(
+        cmd,
+        sizeof(cmd),
+        "CONNECT,%s,%s,%s,%u",
+        ssid_hex,
+        psk_hex,
+        app->clients_ap.mac,
+        app->clients_ap.channel);
+    wh_send(app, cmd);
+}
+
+void wh_ap_login_proceed(WavehoundApp* app) {
+    /* Continue from the login flow to the client list: collapse back to
+     * ChannelSelect, which resumes with the pending pick and pushes the client
+     * TargetList (the same path a plain channel pick takes). */
+    app->channel_pick_pending = true;
+    scene_manager_search_and_switch_to_previous_scene(app->scene_manager, WhSceneChannelSelect);
 }
 
 /* ---------- board line parsing (UART worker thread) ---------- */
@@ -154,8 +216,50 @@ static void wh_on_line(char* line, void* context) {
         }
     } else if(strcmp(tag, "INFO_END") == 0) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WhEventBoardInfoReady);
+    } else if(strcmp(tag, "READY") == 0 || strcmp(tag, "PONG") == 0) {
+        /* Capture the board firmware version so the login UI can require it. */
+        const char* v = next_field(&cur);
+        if(v) app->board_fw_version = atoi(v);
+    } else if(strcmp(tag, "CONN") == 0) {
+        /* CONN,GOTIP,<ip>,<gw>,<dns> | CONN,FAIL,<reason> | CONN,DOWN | CONN,ASSOC,... */
+        const char* state = next_field(&cur);
+        if(!state) return;
+        if(strcmp(state, "GOTIP") == 0) {
+            const char* ip = next_field(&cur);
+            strlcpy(app->conn.ip, ip ? ip : "", sizeof(app->conn.ip));
+            app->conn.connecting = false;
+            app->conn.connected = true;
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnGotIp);
+        } else if(strcmp(state, "FAIL") == 0) {
+            app->conn.fail_reason = field_int(&cur);
+            app->conn.connecting = false;
+            app->conn.connected = false;
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnFail);
+        } else if(strcmp(state, "DOWN") == 0) {
+            app->conn.connecting = false;
+            app->conn.connected = false;
+            app->conn.ip[0] = '\0';
+        }
+        /* ASSOC is layer-2 only: nothing to show until GOTIP. */
+    } else if(strcmp(tag, "WPS") == 0) {
+        /* WPS,OK,<ssid_hex>,<psk_hex> | WPS,FAIL,<reason> | WPS,ACTIVE */
+        const char* state = next_field(&cur);
+        if(!state) return;
+        if(strcmp(state, "OK") == 0) {
+            const char* ssid_hex = next_field(&cur);
+            const char* psk_hex = next_field(&cur);
+            char ssid[WH_AP_SSID_MAX] = "";
+            if(ssid_hex) wh_hex_decode(ssid_hex, ssid, sizeof(ssid));
+            if(ssid[0]) strlcpy(app->conn.ssid, ssid, sizeof(app->conn.ssid));
+            if(psk_hex) wh_hex_decode(psk_hex, app->psk_buf, sizeof(app->psk_buf));
+            app->login_pending_save = true; /* offer to save after the join succeeds */
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventWpsOk);
+        } else if(strcmp(state, "FAIL") == 0) {
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventWpsFail);
+        }
+        /* ACTIVE: the WPS scene already shows "press the button". */
     }
-    /* READY / PONG / OK / ERR only refresh the liveness timestamp. */
+    /* OK / ERR and other lines only refresh the liveness timestamp. */
 }
 
 /* Hunt view asks (Right key) to save the current target. */
@@ -220,6 +324,7 @@ static WavehoundApp* wh_app_alloc(void) {
         app->view_dispatcher, WhViewVarItemList, variable_item_list_get_view(app->var_item_list));
 
     wh_store_load(app);
+    wh_ap_store_load(app);
     wh_settings_load(app);
     wh_settings_apply(app);
 
@@ -281,6 +386,10 @@ int32_t wavehound_app(void* p) {
     app->uart = wh_uart_alloc(wh_on_line, app);
     if(app->uart) {
         wh_send(app, "STOP");
+        /* Prompt a PONG,<version> so we learn the board firmware early -- the AP
+         * login UI is gated on it, and during a scan the keep-alive ping is
+         * otherwise suppressed. */
+        wh_send(app, "PING");
     } else {
         FURI_LOG_E(TAG, "USART busy");
     }
