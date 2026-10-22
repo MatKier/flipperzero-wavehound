@@ -98,13 +98,14 @@ def read_json_field(path, field):
 
 def flipper_sdk():
     """'<SDK version> (API <api>)' of the SDK ufbt built against. The state file has a
-    version for channel installs; for `ufbt update --url` take it from the SDK URL."""
+    version for channel installs; `ufbt update --url` (CI) stores a placeholder
+    there instead, so take it from the SDK URL."""
     try:
         state = json.loads((UFBT_SDK / "ufbt_state.json").read_text())
     except (OSError, ValueError):
         state = {}
     m = re.search(r"sdk-([^/]+?)\.zip", state.get("url", ""))
-    version = state.get("version") or (m.group(1) if m else "unknown")
+    version = m.group(1) if state.get("mode") == "url" and m else state.get("version", "unknown")
     api = "unknown"
     for csv in UFBT_SDK.glob("sdk_headers/*/targets/*/api_symbols.csv"):
         m = re.search(r"^Version,\+,([^,]+)", csv.read_text(), re.M)
