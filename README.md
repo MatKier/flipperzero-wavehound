@@ -96,6 +96,7 @@ tools/package_release.py  collect a release (fap, board bins, notices)
 build_app.py      generate+bundle oui.db, then build the app (ufbt)
 docs/PROTOCOL.md  the UART protocol
 .github/workflows/release.yml  CI build on every branch push; build + publish a release on a v* tag
+.github/workflows/sdk-check.yml  weekly check for a newer Flipper SDK (opens an issue)
 ```
 
 ## Vendor database
