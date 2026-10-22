@@ -1,0 +1,4 @@
+# Build tools for .github/workflows/release.yml. Pinned so every build uses the
+# same versions; the pip cache is keyed on this file and Dependabot bumps it.
+ufbt==0.2.6
+platformio==6.2.0
