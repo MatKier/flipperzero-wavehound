@@ -14,8 +14,16 @@
 /* User-supplied override first, then the database bundled with the app. */
 #define WH_OUI_DB_USER APP_DATA_PATH("oui.db")
 #define WH_OUI_DB_BUNDLED APP_ASSETS_PATH("oui.db")
-#define WH_OUI_RECORD 32 /* 3-byte OUI + 29-byte NUL-padded name */
-#define WH_OUI_NAME 29
+/* oui.db is sorted fixed-width records: 3-byte OUI + NUL-padded name.
+ * It starts with a header record: "WHOUI" + record size (1 byte), NUL-padded
+ * to one record, so the records follow at index 1 and the size can change
+ * without an app update. Files without it are the older format: 32-byte
+ * records from offset 0. ('W' has the group bit set, so no real OUI record
+ * can look like the header.) */
+#define WH_OUI_MAGIC "WHOUI"
+#define WH_OUI_MAGIC_LEN 5
+#define WH_OUI_LEGACY_RECORD 32
+#define WH_OUI_NAME_MAX 31 /* longer names are cut */
 
 /* Binary search a sorted fixed-width oui.db on the SD card, if present. */
 static bool lookup_file(const char* path, const uint8_t oui[3], char* out, size_t out_size) {
@@ -25,18 +33,27 @@ static bool lookup_file(const char* path, const uint8_t oui[3], char* out, size_
 
     if(storage_file_open(f, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
         const uint64_t size = storage_file_size(f);
+        size_t record = WH_OUI_LEGACY_RECORD;
         size_t lo = 0;
-        size_t hi = (size_t)(size / WH_OUI_RECORD);
+        uint8_t head[WH_OUI_MAGIC_LEN + 1];
+        if(storage_file_read(f, head, sizeof(head)) == sizeof(head) &&
+           memcmp(head, WH_OUI_MAGIC, WH_OUI_MAGIC_LEN) == 0) {
+            record = head[WH_OUI_MAGIC_LEN];
+            lo = 1;
+        }
+        size_t hi = record > 3 ? (size_t)(size / record) : 0;
+        const uint16_t name_len =
+            (uint16_t)(record - 3 < WH_OUI_NAME_MAX ? record - 3 : WH_OUI_NAME_MAX);
         while(lo < hi) {
             const size_t mid = lo + (hi - lo) / 2;
-            if(!storage_file_seek(f, (uint32_t)(mid * WH_OUI_RECORD), true)) break;
+            if(!storage_file_seek(f, (uint32_t)(mid * record), true)) break;
             uint8_t key[3];
             if(storage_file_read(f, key, 3) != 3) break;
             const int c = memcmp(key, oui, 3);
             if(c == 0) {
-                char name[WH_OUI_NAME + 1];
-                uint16_t r = storage_file_read(f, (uint8_t*)name, WH_OUI_NAME);
-                if(r > WH_OUI_NAME) r = WH_OUI_NAME;
+                char name[WH_OUI_NAME_MAX + 1];
+                uint16_t r = storage_file_read(f, (uint8_t*)name, name_len);
+                if(r > name_len) r = name_len;
                 name[r] = '\0'; /* records are NUL-padded, so this trims cleanly */
                 strlcpy(out, name, out_size);
                 found = true;

@@ -3,7 +3,7 @@
 # - push to any branch: build + package as a CI check. Runs can restore caches
 #   saved on their own branch or on the default branch (main); tag runs only the
 #   default branch's, so the large toolchain caches (ufbt, PlatformIO) are saved
-#   there only. This week's manuf is saved on any branch.
+#   there only.
 # - v<fap_version> tag: build, package and publish the GitHub release.
 # - workflow_dispatch: same files as a build artifact, no release.
 name: Build and release
@@ -50,11 +50,14 @@ jobs:
             exit 1
           fi
 
+      # The vendor db and the Wireshark manuf it's built from are committed (the
+      # catalog builds from the tree as-is); make sure they still match.
+      - name: Check oui.db matches tools/manuf.gz
+        run: python3 tools/gen_oui.py tools/manuf.gz --check flipper_app/assets/oui.db
+
       - name: Install ufbt and PlatformIO
         run: pip install -r .github/ci/requirements.txt
 
-      # Wireshark updates manuf weekly and asks not to fetch it more often, so
-      # keep one copy per ISO week and download only on a miss.
       # The two toolchains are cached separately, each keyed on its own pins, so
       # bumping one doesn't throw away the other:
       # - ufbt (~/.ufbt: ARM toolchain + SDK) on FLIPPER_SDK. ufbt brings its own
@@ -65,27 +68,9 @@ jobs:
       - name: Cache keys
         id: keys
         run: |
-          echo "manuf=manuf-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
           echo "ufbt=ufbt-${{ runner.os }}-$FLIPPER_SDK" >> "$GITHUB_OUTPUT"
           pio=$(sed -nE 's/^(platform|platform_packages) *= *//p' firmware/platformio.ini | tr -s ' \n' '+' | sed 's/+$//')
           echo "pio=pio-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$pio" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache/restore@v6
-        id: manuf
-        with:
-          path: manuf.gz
-          key: ${{ steps.keys.outputs.manuf }}
-
-      - name: Fetch Wireshark manuf
-        if: steps.manuf.outputs.cache-hit != 'true'
-        run: curl -fsSL -o manuf.gz https://www.wireshark.org/download/automated/data/manuf.gz
-
-      # Saved right away, so a tag pushed while this run is still building can use it.
-      - uses: actions/cache/save@v6
-        if: github.ref_type == 'branch' && steps.manuf.outputs.cache-hit != 'true'
-        with:
-          path: manuf.gz
-          key: ${{ steps.keys.outputs.manuf }}
 
       - uses: actions/cache/restore@v6
         id: ufbt
@@ -101,9 +86,8 @@ jobs:
 
       - name: Build Flipper app
         run: |
-          gunzip -k manuf.gz
           ufbt update --hw-target f7 --url "https://update.flipperzero.one/builds/firmware/$FLIPPER_SDK/flipper-z-f7-sdk-$FLIPPER_SDK.zip"
-          python3 build_app.py --manuf manuf
+          python3 build_app.py
 
       # Each toolchain is saved right after its own build succeeds, so a failing
       # firmware build doesn't stop a fresh ufbt cache from being kept.
@@ -123,7 +107,7 @@ jobs:
           key: ${{ steps.keys.outputs.pio }}
 
       - name: Package
-        run: python3 tools/package_release.py --manuf manuf.gz -o dist --notes release-notes.md
+        run: python3 tools/package_release.py -o dist --notes release-notes.md
 
       - uses: actions/upload-artifact@v7
         with:

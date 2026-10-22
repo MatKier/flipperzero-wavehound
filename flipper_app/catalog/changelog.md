@@ -1,3 +1,12 @@
+## v1.13
+
+- The MAC vendor database is now part of the source, so apps installed from the
+  Flipper Apps Catalog also show device vendors (before, only the GitHub
+  release had them).
+- The bundled vendor database is half the size (16-byte records instead of
+  32). Your own `oui.db` in `apps_data/wavehound/` in the old format still
+  works.
+
 ## v1.12
 
 - New settings: **Hop dwell** (how long a hunt stays on each channel while
