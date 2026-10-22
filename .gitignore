@@ -7,8 +7,7 @@ firmware/managed_components/
 firmware/dependencies.lock
 flipper_app/dist/
 flipper_app/.ufbt/
-flipper_app/assets/oui.db
 .vscode/
 __pycache__/
 *.pyc
-oui.db
+/oui.db

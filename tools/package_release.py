@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Collect a Wavehound release into one folder (used by .github/workflows/release.yml).
 
-Run after `python3 build_app.py --manuf manuf` and `pio run -d firmware`:
+Run after `python3 build_app.py` and `pio run -d firmware`:
 
-    python3 tools/package_release.py --manuf manuf.gz -o dist --notes release-notes.md
+    python3 tools/package_release.py -o dist --notes release-notes.md
 
 It produces, in the output folder:
 
@@ -13,7 +13,7 @@ It produces, in the output folder:
     FLASHING.txt                          offsets + esptool commands
     THIRD_PARTY_NOTICES.md                repo notices + build details
     wavehound-licenses.zip                LICENSE, notices and license texts
-    manuf.gz                              the Wireshark data oui.db was built from
+    manuf.gz                              the Wireshark data oui.db was built from (tools/manuf.gz)
 
 Flash offsets and settings come from the build's flasher_args.json, so a
 partition change can't silently ship wrong offsets. License texts are copied
@@ -39,6 +39,7 @@ FIRMWARE_DIR = ROOT / "firmware"
 BUILD_DIR = FIRMWARE_DIR / ".pio" / "build" / "flipper_wifi_devboard"
 FAP = APP_DIR / "dist" / "wavehound.fap"
 OUI_DB = APP_DIR / "assets" / "oui.db"
+MANUF_GZ = ROOT / "tools" / "manuf.gz"
 CHANGELOG = APP_DIR / "catalog" / "changelog.md"
 
 PIO_HOME = Path(os.environ.get("PLATFORMIO_CORE_DIR", Path.home() / ".platformio"))
@@ -73,8 +74,8 @@ LICENSES = [
     ("picolibc-COPYING.NEWLIB.txt", TOOLCHAIN_DIR, "share/licenses/picolibc/COPYING.NEWLIB"),
     ("GCC-COPYING.RUNTIME.txt", TOOLCHAIN_DIR, "share/licenses/gcc/COPYING.RUNTIME"),
     ("GCC-COPYING3.txt", TOOLCHAIN_DIR, "share/licenses/gcc/COPYING3"),
-    # Wireshark (source of oui.db) is GPL-2.0-or-later; this is the stock GPLv2 text.
-    ("GPL-2.0.txt", TOOLCHAIN_DIR, "share/licenses/picolibc/COPYING.GPL2"),
+    # Wireshark (source of oui.db) is GPL-2.0-or-later; the repo carries the stock GPLv2 text.
+    ("GPL-2.0.txt", ROOT, "licenses/GPL-2.0.txt"),
 ]
 
 
@@ -194,7 +195,9 @@ def release_notes(version, fw, full, details):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--manuf", required=True, type=Path, help="the manuf (or manuf.gz) oui.db was built from")
+    ap.add_argument(
+        "--manuf", default=MANUF_GZ, type=Path, help="the manuf (or manuf.gz) oui.db was built from (default: tools/manuf.gz)"
+    )
     ap.add_argument("-o", "--out", default="dist", type=Path, help="output folder (default: dist)")
     ap.add_argument("--notes", type=Path, help="also write GitHub release notes here")
     args = ap.parse_args()
