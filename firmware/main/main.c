@@ -239,6 +239,26 @@ static void handle_wps(char *args)
     proto_sendf("OK,WPS");
 }
 
+static void handle_elicit(char *args)
+{
+    /* "ELICIT,<mac>,<ms>" starts; "ELICIT,STOP" stops. */
+    char *f[2] = {0};
+    int n = split_args(args, f, 2);
+    if (n >= 1 && strcasecmp(f[0], "STOP") == 0) {
+        radio_elicit_stop();
+        proto_sendf("OK,ELICIT");
+        return;
+    }
+    uint8_t mac[6];
+    if (n < 2 || !parse_mac(f[0], mac)) {
+        proto_sendf("ERR,usage ELICIT,<mac>,<ms> | ELICIT,STOP");
+        return;
+    }
+    if (radio_elicit_start(mac, (uint16_t)atoi(f[1]))) {
+        proto_sendf("OK,ELICIT");
+    }
+}
+
 static void handle_line(char *line)
 {
     char *args = strchr(line, ',');
@@ -265,6 +285,8 @@ static void handle_line(char *line)
         proto_sendf("OK,DISCONNECT");
     } else if (strcmp(line, "WPS") == 0) {
         handle_wps(args);
+    } else if (strcmp(line, "ELICIT") == 0) {
+        handle_elicit(args);
     } else if (strcmp(line, "INFO") == 0) {
         info_report();
     } else if (strcmp(line, "STOP") == 0) {

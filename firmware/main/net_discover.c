@@ -49,6 +49,15 @@ static volatile bool s_connected;
  * discovery task writes these, and only while a chunk callback is not queued. */
 static uint32_t s_chunk_lo, s_chunk_hi;
 
+/* Elicitation: a dedicated task pokes one target every interval so it emits
+ * reply frames the hunt can sample. */
+static TaskHandle_t s_elicit_task;
+static volatile bool s_elicit_active;
+static volatile uint32_t s_elicit_interval_ms;
+static volatile uint32_t s_elicit_ip; /* resolved target IP (network order), 0 = unknown */
+static uint8_t s_elicit_mac[6];
+static volatile uint32_t s_arp_target; /* IP handed to the tcpip-thread ARP sender */
+
 /* --- shared host table (hold s_lock) --- */
 
 static void nd_add_locked(const uint8_t mac[6], uint32_t ip)
@@ -467,6 +476,92 @@ static void netscan_task(void *arg)
     }
 }
 
+/* --- elicitation (its own task; ARP via the tcpip thread, ICMP via a raw socket) --- */
+
+static void tcpip_send_arp_one(void *ctx)
+{
+    (void)ctx;
+    const uint32_t tgt = s_arp_target;
+    if (!s_netif || tgt == 0) {
+        return;
+    }
+    ip4_addr_t ip;
+    ip4_addr_set_u32(&ip, tgt);
+    etharp_request(s_netif, &ip); /* the target answers -> the hunt sniffs the reply */
+}
+
+static void icmp_echo(int sock, uint32_t ip_net)
+{
+    if (sock < 0) {
+        return;
+    }
+    static uint16_t seq;
+    uint8_t pkt[16]; /* 8-byte ICMP header + 8-byte payload */
+    memset(pkt, 0, sizeof(pkt));
+    pkt[0] = 8; /* echo request */
+    pkt[4] = 0xaa;
+    pkt[5] = 0x55; /* identifier */
+    const uint16_t s = seq++;
+    pkt[6] = s >> 8;
+    pkt[7] = s & 0xff;
+    uint32_t sum = 0;
+    for (size_t i = 0; i < sizeof(pkt); i += 2) {
+        sum += (pkt[i] << 8) | pkt[i + 1];
+    }
+    while (sum >> 16) {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    const uint16_t csum = (uint16_t)~sum;
+    pkt[2] = csum >> 8;
+    pkt[3] = csum & 0xff;
+    struct sockaddr_in dst = {0};
+    dst.sin_family = AF_INET;
+    dst.sin_addr.s_addr = ip_net;
+    sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
+}
+
+static void elicit_task(void *arg)
+{
+    (void)arg;
+    int raw = -1;
+    for (;;) {
+        if (!s_elicit_active || !s_connected) {
+            if (raw >= 0) {
+                close(raw);
+                raw = -1;
+            }
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+        if (raw < 0) {
+            raw = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP); /* best-effort; ARP alone still works */
+        }
+        uint32_t ip = s_elicit_ip;
+        if (ip == 0) {
+            if (!net_discover_lookup(s_elicit_mac, &ip)) {
+                net_discover_rescan(); /* ask the sweep to find the target's IP */
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(600));
+                if (!net_discover_lookup(s_elicit_mac, &ip)) {
+                    ip = 0;
+                }
+            }
+            if (ip) {
+                s_elicit_ip = ip;
+            }
+        }
+        if (ip) {
+            s_arp_target = ip;
+            tcpip_callback(tcpip_send_arp_one, NULL);
+            icmp_echo(raw, ip);
+        }
+        uint32_t iv = s_elicit_interval_ms;
+        if (iv < 50) {
+            iv = 50;
+        }
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(iv)); /* next tick, or wake early on a state change */
+    }
+}
+
 /* --- public API --- */
 
 void net_discover_init(void)
@@ -474,6 +569,7 @@ void net_discover_init(void)
     s_lock = xSemaphoreCreateMutex();
     s_snapshot_done = xSemaphoreCreateBinary();
     xTaskCreate(netscan_task, "netscan", 4096, NULL, 4, &s_task);
+    xTaskCreate(elicit_task, "elicit", 3072, NULL, 4, &s_elicit_task);
 }
 
 void net_discover_on_gotip(esp_netif_t *netif, uint32_t ip, uint32_t mask, uint32_t dns)
@@ -491,6 +587,10 @@ void net_discover_on_gotip(esp_netif_t *netif, uint32_t ip, uint32_t mask, uint3
 void net_discover_on_down(void)
 {
     s_connected = false;
+    net_discover_elicit_stop();
+    if (s_elicit_task) {
+        xTaskNotifyGive(s_elicit_task); /* let the elicit task close its socket */
+    }
     if (s_lock) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_host_count = 0;
@@ -521,4 +621,33 @@ bool net_discover_lookup(const uint8_t mac[6], uint32_t *out_ip)
     }
     xSemaphoreGive(s_lock);
     return ok;
+}
+
+void net_discover_elicit_start(const uint8_t mac[6], uint32_t interval_ms)
+{
+    if (interval_ms < 50) {
+        interval_ms = 50;
+    } else if (interval_ms > 1000) {
+        interval_ms = 1000;
+    }
+    memcpy(s_elicit_mac, mac, 6);
+    s_elicit_ip = 0; /* the task resolves it (from the sweep table) */
+    s_elicit_interval_ms = interval_ms;
+    s_elicit_active = true;
+    if (s_elicit_task) {
+        xTaskNotifyGive(s_elicit_task);
+    }
+    proto_sendf("ELICIT,ON,%u", (unsigned)interval_ms);
+}
+
+void net_discover_elicit_stop(void)
+{
+    const bool was_active = s_elicit_active;
+    s_elicit_active = false;
+    if (s_elicit_task) {
+        xTaskNotifyGive(s_elicit_task);
+    }
+    if (was_active) {
+        proto_sendf("ELICIT,OFF");
+    }
 }

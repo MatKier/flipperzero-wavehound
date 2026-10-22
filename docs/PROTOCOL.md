@@ -16,6 +16,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `CONNECT,<ssid_hex>,<psk_hex>[,<bssid>][,<ch>]` | Associate with an access point in station mode (v9+). `<ssid_hex>` and `<psk_hex>` are the SSID and passphrase [hex-encoded](#hex-encoded-fields); an empty `<psk_hex>` joins an open network. The optional `<bssid>` (a MAC) and `<ch>` (1-13) pin and speed up the join and may appear in either order. Promiscuous RX stays live, so a hunt keeps sampling on the AP's channel. Progress is reported as [`CONN,...`](#association) lines. |
 | `DISCONNECT`          | Drop the association and return to pure receive-only sniffing. Answered with `CONN,DOWN`. |
 | `WPS` / `WPS,STOP`    | Start / cancel WPS push-button (PBC) enrolment (v10+). On success the board reports the negotiated credentials ([`WPS,OK,...`](#wps)) and associates; `WPS,STOP` cancels an armed exchange. |
+| `ELICIT,<mac>,<ms>` / `ELICIT,STOP` | Start / stop poking a target so a silent device can be hunted (v12+). Needs a DHCP lease (else `ERR`). The board pings `<mac>` every `<ms>` (clamped 50-1000) with a unicast ARP request and an ICMP echo; the replies are frames the hunt samples. The target's IP is taken from the [host-discovery](#host-discovery) table. See [Elicitation](#elicitation). |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
 | `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. The idle LED stays lit (blue). |
 | `SLEEP`               | Like `STOP`, but also turn the LED off (dark idle). The app sends this on exit, since the board stays powered on the Flipper's always-on 3V3 rail. |
@@ -62,6 +63,7 @@ put `PIN` before any token.
 | `CONN,<state>[,...]`                           | Station-association progress (v9+). See [Association](#association). |
 | `WPS,<state>[,...]`                            | WPS push-button progress (v10+). See [WPS](#wps). |
 | `IP,<mac>,<ip>[,<host_hex>]`                   | A host found on the associated subnet (v11+): its MAC, IPv4, and — once a best-effort lookup finds one — its [hex-encoded](#hex-encoded-fields) hostname. Streamed as an ARP sweep learns hosts; the IP is sent first and the same line is re-sent with a hostname if one is resolved. The app matches by `<mac>` to annotate list/hunt rows. See [Host discovery](#host-discovery). |
+| `ELICIT,ON,<ms>` / `ELICIT,OFF`                | Elicitation state (v12+): poking `<mac>` every `<ms>` has started / stopped. |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Commit, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Assoc, IP, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `Firmware` is the board firmware version (the same value carried by `READY`/`PONG`); `Commit` is the build system's version string (`git describe` for a git checkout, else `version.txt`/`PROJECT_VER`). `Assoc` is the SSID the board is associated with (`-` when not), `IP` its DHCP lease (`-` when none). `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |
 | `INFO_END`                                     | End of an `INFO` reply.               |
@@ -128,5 +130,18 @@ consumer networks return no name; the IP is always provided. The app keys on
 hunts. A fresh sweep runs when a client scan starts, so the list stays current.
 Reverse DNS/NBNS and the ARP table are all handled on the board; the Flipper
 only consumes the `IP` lines.
+
+### Elicitation
+
+A silent target (one that rarely transmits) gives a hunt almost no RSSI samples.
+While associated, `ELICIT,<mac>,<ms>` makes the board poke that target every
+`<ms>` (clamped to 50–1000) with a unicast ARP request — which virtually every
+host answers, even when it drops ICMP — plus an ICMP echo as a complement. Each
+reply is a frame transmitted by the target, so the running hunt (parked on the
+AP's channel) samples it like any other. It is a low-rate, single-target probe
+for direction finding, not a flood: one ARP + one echo per interval. The target
+IP comes from the [host-discovery](#host-discovery) table (a rescan is triggered
+if the MAC isn't mapped yet). `ELICIT,STOP`, `STOP`, `SLEEP` and losing the link
+all stop it. The board emits `ELICIT,ON,<ms>` / `ELICIT,OFF` as it starts/stops.
 
 SSIDs are sanitized: control characters become `?`, so every message stays on one line.

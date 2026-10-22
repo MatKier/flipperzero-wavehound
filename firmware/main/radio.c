@@ -841,11 +841,12 @@ static void radio_task(void *arg)
             switch (cmd.type) {
             case CMD_STOP:
                 set_mode(MODE_IDLE);
+                net_discover_elicit_stop(); /* no hunt to feed anymore */
                 led_set(0, 0, 8);
                 break;
             case CMD_SLEEP:
                 set_mode(MODE_IDLE);
-                do_disconnect(); /* drop the link on app exit */
+                do_disconnect(); /* drop the link on app exit (also stops elicitation) */
                 led_set(0, 0, 0);
                 break;
             case CMD_HUNT:
@@ -985,6 +986,21 @@ void radio_wps_stop(void)
 {
     const radio_cmd_t cmd = {.type = CMD_WPS_STOP};
     post(&cmd);
+}
+
+bool radio_elicit_start(const uint8_t mac[6], uint16_t interval_ms)
+{
+    if (!s_got_ip) {
+        proto_sendf("ERR,ELICIT needs a connection");
+        return false;
+    }
+    net_discover_elicit_start(mac, interval_ms);
+    return true;
+}
+
+void radio_elicit_stop(void)
+{
+    net_discover_elicit_stop();
 }
 
 void radio_conn_summary(char *ssid, size_t ssid_sz, char *ip, size_t ip_sz)

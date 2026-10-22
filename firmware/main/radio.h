@@ -64,6 +64,16 @@ void radio_wps_start(void);
 void radio_wps_stop(void);
 
 /**
+ * Start eliciting reply frames from `mac` (a client of the associated AP) at
+ * `interval_ms`, so a silent target can be hunted. Requires a DHCP lease;
+ * returns false (and reports `ERR`) if not connected. Emits `ELICIT,ON`.
+ */
+bool radio_elicit_start(const uint8_t mac[6], uint16_t interval_ms);
+
+/** Stop elicitation (emits `ELICIT,OFF` if it was running). */
+void radio_elicit_stop(void);
+
+/**
  * Fill short association / IPv4 strings for the INFO block. Each is set to "-"
  * when not associated or without a lease yet. `ssid` should hold >= 33 bytes and
  * `ip` >= 16; either pointer may be NULL to skip it.
