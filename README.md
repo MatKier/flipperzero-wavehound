@@ -95,7 +95,7 @@ tools/gen_oui.py  build oui.db (vendor database) from Wireshark's manuf
 tools/package_release.py  collect a release (fap, board bins, notices)
 build_app.py      generate+bundle oui.db, then build the app (ufbt)
 docs/PROTOCOL.md  the UART protocol
-.github/workflows/release.yml  CI build on main; build + publish a release on a v* tag
+.github/workflows/release.yml  CI build on every branch push; build + publish a release on a v* tag
 ```
 
 ## Vendor database

@@ -45,7 +45,7 @@ flipper_app/
 tools/gen_oui.py          build oui.db from Wireshark's manuf
 tools/package_release.py  collect release files (fap, board bins, merged bin, notices)
 build_app.py              generate+bundle oui.db, then run ufbt
-.github/workflows/release.yml  build app + firmware on main (CI, saves caches); on v* tag also publish the release
+.github/workflows/release.yml  build app + firmware on every branch push (CI); on v* tag also publish the release
 THIRD_PARTY_NOTICES.md    licenses of what the release binaries contain
 docs/PROTOCOL.md          the UART protocol (source of truth for the wire format)
 ```
@@ -123,9 +123,9 @@ If the version bump lands as a direct commit on `main` rather than via a PR
 Pushing the tag runs `.github/workflows/release.yml`, which builds both sides
 and publishes the GitHub release (it fails if the tag isn't `v<fap_version>`
 or `changelog.md` has no `## v<fap_version>` entry; the entry becomes the
-release notes). The same workflow builds every push to `main` as a CI check
-and saves the caches there (toolchains, the weekly Wireshark `manuf`), because
-tag runs can only restore caches saved on `main`. If an
+release notes). The same workflow builds every branch push as a CI check.
+The toolchain cache is saved on `main` only, because tag runs can only restore
+caches saved on `main`; the weekly Wireshark `manuf` is cached per branch too. If an
 ESP-IDF/platform bump moves or adds linked components, update `LICENSES` in
 `tools/package_release.py` and the table in `THIRD_PARTY_NOTICES.md`.
 
