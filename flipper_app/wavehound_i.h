@@ -58,6 +58,7 @@ typedef enum {
     WhEventWpsFail,     /* board reported WPS,FAIL */
     WhEventApSave,      /* save-prompt: store the credentials */
     WhEventApDiscard,   /* save-prompt: don't store / skip */
+    WhEventElicitToggle, /* hunt screen: Down pressed to toggle the elicitation ping */
 } WhCustomEvent;
 
 /** A hunt target the user saved by name, persisted to the SD card. */
@@ -92,6 +93,8 @@ typedef struct {
     bool is_ap;
     bool randomized; /* locally administered MAC */
     bool pin_channel; /* user chose the channel: board must not hop away */
+    char ip[16];   /* IPv4 on the associated subnet (from IP,... lines), else empty */
+    char host[33]; /* best-effort hostname, else empty */
 } WhTarget;
 
 /** A saved AP credential, persisted to the SD card (plaintext, like saved MACs). */

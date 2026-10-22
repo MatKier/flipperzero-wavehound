@@ -6,7 +6,7 @@
 /* App settings, edited with a VariableItemList and saved on exit. */
 
 #define VOLUME_COUNT 10 /* 0.1 .. 1.0 in 0.1 steps */
-#define WH_SETTINGS_RESET_INDEX 10 /* position of "Reset to defaults" in the list */
+#define WH_SETTINGS_RESET_INDEX 11 /* position of "Reset to defaults" in the list */
 
 static const char* const sound_names[] = {"On", "Muted"};
 static const char* const saved_hunt_names[] = {"Saved", "Auto-hop", "Nearby AP"};
@@ -90,6 +90,13 @@ static void scan_dwell_changed(VariableItem* item) {
     uint8_t idx = variable_item_get_current_value_index(item);
     app->settings.scan_dwell = idx;
     wh_settings_ms_text(item, wh_settings_scan_dwell_ms(idx));
+}
+
+static void ping_interval_changed(VariableItem* item) {
+    WavehoundApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    app->settings.ping_interval = idx;
+    wh_settings_ms_text(item, wh_settings_ping_interval_ms(idx));
 }
 
 static void haptic_changed(VariableItem* item) {
@@ -190,6 +197,14 @@ static void wh_settings_build_list(WavehoundApp* app) {
     item = variable_item_list_add(list, "Keep backlight", 2, keep_backlight_changed, app);
     variable_item_set_current_value_index(item, blidx);
     variable_item_set_current_value_text(item, off_on_names[blidx]);
+
+    /* Elicitation ping interval (hunt screen, Down key) */
+    uint8_t piidx = app->settings.ping_interval;
+    if(piidx >= WH_PING_INTERVAL_COUNT) piidx = 2;
+    item =
+        variable_item_list_add(list, "Ping interval", WH_PING_INTERVAL_COUNT, ping_interval_changed, app);
+    variable_item_set_current_value_index(item, piidx);
+    wh_settings_ms_text(item, wh_settings_ping_interval_ms(piidx));
 
     /* Press OK to restore every setting above to its default */
     variable_item_list_add(list, "Reset to defaults", 0, NULL, app);

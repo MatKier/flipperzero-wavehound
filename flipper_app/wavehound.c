@@ -203,6 +203,31 @@ static void wh_on_line(char* line, void* context) {
             strlcpy(t->phy, phy, sizeof(t->phy));
         }
         furi_mutex_release(app->results_mutex);
+    } else if(strcmp(tag, "IP") == 0) {
+        /* IP,<mac>,<ip>[,<host_hex>] -- annotate the matching client row and, if
+         * it's the target we're hunting, the hunt screen. */
+        const char* mac = next_field(&cur);
+        const char* ip = next_field(&cur);
+        if(!mac || !ip) return;
+        char host[33] = "";
+        const char* host_hex = next_field(&cur);
+        if(host_hex) wh_hex_decode(host_hex, host, sizeof(host));
+
+        furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+        for(size_t i = 0; i < app->result_count; i++) {
+            if(strcmp(app->results[i].mac, mac) == 0) {
+                strlcpy(app->results[i].ip, ip, sizeof(app->results[i].ip));
+                if(host[0]) strlcpy(app->results[i].host, host, sizeof(app->results[i].host));
+                break;
+            }
+        }
+        furi_mutex_release(app->results_mutex);
+
+        if(strcmp(mac, app->target.mac) == 0) {
+            strlcpy(app->target.ip, ip, sizeof(app->target.ip));
+            if(host[0]) strlcpy(app->target.host, host, sizeof(app->target.host));
+            wh_hunt_view_set_ip(app->hunt, app->target.ip, app->target.host);
+        }
     } else if(strcmp(tag, "INFO_BEGIN") == 0) {
         furi_mutex_acquire(app->results_mutex, FuriWaitForever);
         furi_string_set(app->board_info, "\e#Board info\n");
@@ -280,6 +305,12 @@ static void wh_hunt_save_cb(void* context) {
     view_dispatcher_send_custom_event(app->view_dispatcher, WhEventSaveTarget);
 }
 
+/* Hunt view asks (Down key) to toggle the elicitation ping. */
+static void wh_hunt_elicit_cb(void* context) {
+    WavehoundApp* app = context;
+    view_dispatcher_send_custom_event(app->view_dispatcher, WhEventElicitToggle);
+}
+
 /* ---------- dispatcher plumbing ---------- */
 
 static bool wh_custom_event_callback(void* context, uint32_t event) {
@@ -327,6 +358,7 @@ static WavehoundApp* wh_app_alloc(void) {
     view_dispatcher_add_view(app->view_dispatcher, WhViewWidget, widget_get_view(app->widget));
     app->hunt = wh_hunt_view_alloc();
     wh_hunt_view_set_save_callback(app->hunt, wh_hunt_save_cb, app);
+    wh_hunt_view_set_elicit_callback(app->hunt, wh_hunt_elicit_cb, app);
     view_dispatcher_add_view(app->view_dispatcher, WhViewHunt, wh_hunt_view_get_view(app->hunt));
     app->spectrum = wh_spectrum_view_alloc();
     view_dispatcher_add_view(

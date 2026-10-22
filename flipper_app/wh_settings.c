@@ -24,6 +24,7 @@
 static const uint16_t hop_dwell_ms[WH_HOP_DWELL_COUNT] = {100, 200, 300, 500, 1000, 2000};
 static const uint16_t research_s[WH_RESEARCH_COUNT] = {4, 8, 15, 30, 60};
 static const uint16_t scan_dwell_ms[WH_SCAN_DWELL_COUNT] = {120, 250, 500, 1000, 2000};
+static const uint16_t ping_interval_ms[WH_PING_INTERVAL_COUNT] = {50, 100, 250, 500, 1000};
 
 void wh_settings_reset(WhSettings* s) {
     s->click_volume = 0.5f;
@@ -33,9 +34,10 @@ void wh_settings_reset(WhSettings* s) {
     s->keep_backlight = true;
     s->range_mode = WhRangeNormal;
     s->meter_response = WhResponseNormal;
-    s->hop_dwell = 2;  /* 300 ms */
-    s->research = 1;   /* 8 s */
-    s->scan_dwell = 0; /* 120 ms */
+    s->hop_dwell = 2;     /* 300 ms */
+    s->research = 1;      /* 8 s */
+    s->scan_dwell = 0;    /* 120 ms */
+    s->ping_interval = 2; /* 250 ms */
 }
 
 void wh_settings_range_bounds(uint8_t mode, int8_t* floor, int8_t* ceil) {
@@ -80,6 +82,10 @@ uint16_t wh_settings_scan_dwell_ms(uint8_t idx) {
     return scan_dwell_ms[idx < WH_SCAN_DWELL_COUNT ? idx : 0];
 }
 
+uint16_t wh_settings_ping_interval_ms(uint8_t idx) {
+    return ping_interval_ms[idx < WH_PING_INTERVAL_COUNT ? idx : 2];
+}
+
 void wh_settings_apply(WavehoundApp* app) {
     const WhSettings* s = &app->settings;
     wh_hunt_view_set_volume(app->hunt, s->click_volume);
@@ -122,6 +128,9 @@ static void apply_kv(WhSettings* s, const char* key, const char* value) {
     } else if(strcmp(key, "scan_dwell") == 0) {
         int m = atoi(value);
         if(m >= 0 && m < WH_SCAN_DWELL_COUNT) s->scan_dwell = (uint8_t)m;
+    } else if(strcmp(key, "ping_interval") == 0) {
+        int m = atoi(value);
+        if(m >= 0 && m < WH_PING_INTERVAL_COUNT) s->ping_interval = (uint8_t)m;
     }
 }
 
@@ -171,6 +180,7 @@ void wh_settings_save(WavehoundApp* app) {
         stream_write_format(stream, "hop_dwell=%u\n", s->hop_dwell);
         stream_write_format(stream, "research=%u\n", s->research);
         stream_write_format(stream, "scan_dwell=%u\n", s->scan_dwell);
+        stream_write_format(stream, "ping_interval=%u\n", s->ping_interval);
     }
 
     buffered_file_stream_close(stream);

@@ -27,6 +27,11 @@ static void format_label(const WhTarget* t, char* out, size_t size) {
     if(t->is_ap) {
         /* hidden networks have no SSID: show the BSSID */
         snprintf(out, size, "%d c%u %s", t->rssi, t->channel, t->name[0] ? t->name : t->mac);
+    } else if(t->host[0]) {
+        /* a resolved hostname is the most useful identity */
+        snprintf(out, size, "%d c%u %s", t->rssi, t->channel, t->host);
+    } else if(t->ip[0]) {
+        snprintf(out, size, "%d c%u %s", t->rssi, t->channel, t->ip);
     } else {
         /* '*' marks a randomized (privacy) MAC */
         snprintf(out, size, "%d c%u %s%s", t->rssi, t->channel, t->mac, t->randomized ? "*" : "");
@@ -97,10 +102,19 @@ static size_t wh_scene_target_list_sync_rows(WavehoundApp* app) {
     char label[64];
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
     const size_t count = app->result_count;
-    for(; s_shown < count; s_shown++) {
-        format_label(&app->results[s_shown], label, sizeof(label));
-        submenu_add_item(app->submenu, label, s_shown + 1, wh_scene_target_list_callback, app);
+    for(size_t i = 0; i < count; i++) {
+        format_label(&app->results[i], label, sizeof(label));
+        if(i < s_shown) {
+            /* Existing row: refresh it once it has learned an IP/hostname (the
+             * ARP sweep streams those in after the row was first added). */
+            if(app->results[i].ip[0] || app->results[i].host[0]) {
+                submenu_change_item_label(app->submenu, i + 1, label);
+            }
+        } else {
+            submenu_add_item(app->submenu, label, i + 1, wh_scene_target_list_callback, app);
+        }
     }
+    s_shown = count;
     furi_mutex_release(app->results_mutex);
     return count;
 }

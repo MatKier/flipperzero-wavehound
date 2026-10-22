@@ -37,6 +37,10 @@ typedef struct {
     bool sound;
     int8_t rssi_floor; /* dBm where the meter reads empty */
     int8_t rssi_ceil;  /* dBm where the meter reads full */
+    char ip[16];       /* target IPv4 (shown as the label), else empty */
+    char host[33];     /* target hostname (preferred label), else empty */
+    bool elicit_avail; /* elicitation offered (connected + IP known) */
+    bool elicit_on;    /* elicitation currently running */
 } WhHuntModel;
 
 struct WhHuntView {
@@ -52,6 +56,8 @@ struct WhHuntView {
     uint32_t last_heard_tick;
     WhHuntSaveCallback save_cb;
     void* save_ctx;
+    WhHuntElicitCallback elicit_cb;
+    void* elicit_ctx;
 };
 
 static float rssi_fraction(float rssi, int8_t floor, int8_t ceil) {
@@ -86,7 +92,9 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
     }
     canvas_draw_str_aligned(canvas, 128, 0, AlignRight, AlignTop, buf);
     canvas_set_font(canvas, FontPrimary);
-    FuriString* name = furi_string_alloc_set(m->name);
+    /* Prefer a resolved hostname, then the IP, falling back to the SSID/MAC. */
+    const char* label = m->host[0] ? m->host : (m->ip[0] ? m->ip : m->name);
+    FuriString* name = furi_string_alloc_set(label);
     elements_string_fit_width(canvas, name, 104);
     canvas_draw_str(canvas, 0, 9, furi_string_get_cstr(name));
     furi_string_free(name);
@@ -175,6 +183,24 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
         canvas_set_color(canvas, ColorBlack);
         canvas_draw_str(canvas, 1, GRAPH_TOP + 8, buf);
     }
+
+    /* Elicitation (ping) status, bottom-right: plain "ping" when Down would arm
+     * it, inverted when it is running. Both sit on a white backing so they stay
+     * legible over the graph. */
+    if(m->elicit_avail) {
+        canvas_set_font(canvas, FontSecondary);
+        const int tw = canvas_string_width(canvas, "ping");
+        const int bx = 128 - tw - 4;
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_box(canvas, bx, GRAPH_TOP, tw + 4, 9);
+        canvas_set_color(canvas, ColorBlack);
+        if(m->elicit_on) {
+            canvas_draw_box(canvas, bx, GRAPH_TOP, tw + 4, 9);
+            canvas_set_color(canvas, ColorWhite);
+        }
+        canvas_draw_str(canvas, bx + 2, GRAPH_TOP + 8, "ping");
+        canvas_set_color(canvas, ColorBlack);
+    }
 }
 
 static bool wh_hunt_input(InputEvent* event, void* context) {
@@ -199,6 +225,15 @@ static bool wh_hunt_input(InputEvent* event, void* context) {
     if(event->key == InputKeyRight) {
         if(hunt->save_cb) hunt->save_cb(hunt->save_ctx);
         return true;
+    }
+    if(event->key == InputKeyDown) {
+        bool avail = false;
+        with_view_model(hunt->view, WhHuntModel * m, { avail = m->elicit_avail; }, false);
+        if(avail && hunt->elicit_cb) {
+            hunt->elicit_cb(hunt->elicit_ctx);
+            return true;
+        }
+        return false;
     }
     return false;
 }
@@ -342,6 +377,30 @@ View* wh_hunt_view_get_view(WhHuntView* hunt) {
 void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, void* context) {
     hunt->save_cb = cb;
     hunt->save_ctx = context;
+}
+
+void wh_hunt_view_set_elicit_callback(WhHuntView* hunt, WhHuntElicitCallback cb, void* context) {
+    hunt->elicit_cb = cb;
+    hunt->elicit_ctx = context;
+}
+
+void wh_hunt_view_set_ip(WhHuntView* hunt, const char* ip, const char* host) {
+    with_view_model(
+        hunt->view,
+        WhHuntModel * m,
+        {
+            strlcpy(m->ip, ip ? ip : "", sizeof(m->ip));
+            strlcpy(m->host, host ? host : "", sizeof(m->host));
+        },
+        true);
+}
+
+void wh_hunt_view_set_elicit_available(WhHuntView* hunt, bool available) {
+    with_view_model(hunt->view, WhHuntModel * m, { m->elicit_avail = available; }, true);
+}
+
+void wh_hunt_view_set_elicit_on(WhHuntView* hunt, bool on) {
+    with_view_model(hunt->view, WhHuntModel * m, { m->elicit_on = on; }, true);
 }
 
 void wh_hunt_view_set_volume(WhHuntView* hunt, float volume) {

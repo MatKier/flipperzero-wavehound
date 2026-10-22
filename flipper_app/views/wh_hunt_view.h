@@ -9,12 +9,27 @@ typedef struct WhHuntView WhHuntView;
 /** Called when the user asks to save the current target (Right key). */
 typedef void (*WhHuntSaveCallback)(void* context);
 
+/** Called when the user presses Down to toggle the elicitation ping. */
+typedef void (*WhHuntElicitCallback)(void* context);
+
 WhHuntView* wh_hunt_view_alloc(void);
 void wh_hunt_view_free(WhHuntView* hunt);
 View* wh_hunt_view_get_view(WhHuntView* hunt);
 
 /** Register the callback fired when the user presses Right to save the target. */
 void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, void* context);
+
+/** Register the callback fired when the user presses Down to toggle elicitation. */
+void wh_hunt_view_set_elicit_callback(WhHuntView* hunt, WhHuntElicitCallback cb, void* context);
+
+/** Set the target's IP / hostname (shown as the header label; either may be ""). */
+void wh_hunt_view_set_ip(WhHuntView* hunt, const char* ip, const char* host);
+
+/** Whether elicitation is offered here (connected + target IP known). */
+void wh_hunt_view_set_elicit_available(WhHuntView* hunt, bool available);
+
+/** Reflect the current elicitation on/off state (for the indicator). */
+void wh_hunt_view_set_elicit_on(WhHuntView* hunt, bool on);
 
 /** Set the geiger click loudness (0..1). */
 void wh_hunt_view_set_volume(WhHuntView* hunt, float volume);

@@ -1,10 +1,24 @@
 #include "../wavehound_i.h"
 
+#include <stdio.h>
+
+/* Whether the elicitation ping is currently running (reset on each hunt). */
+static bool s_elicit_on;
+
+/* Elicitation is offered only when associated and the target's IP is known. */
+static bool wh_scene_hunt_elicit_avail(WavehoundApp* app) {
+    return app->conn.connected && app->target.ip[0] != '\0';
+}
+
 void wh_scene_hunt_on_enter(void* context) {
     WavehoundApp* app = context;
     const WhTarget* t = &app->target;
 
     wh_hunt_view_set_target(app->hunt, t->name[0] ? t->name : t->mac, t->channel);
+    wh_hunt_view_set_ip(app->hunt, t->ip, t->host);
+    s_elicit_on = false;
+    wh_hunt_view_set_elicit_on(app->hunt, false);
+    wh_hunt_view_set_elicit_available(app->hunt, wh_scene_hunt_elicit_avail(app));
 
     if(app->settings.keep_backlight) {
         notification_message(app->notifications, &sequence_display_backlight_enforce_on);
@@ -28,6 +42,39 @@ void wh_scene_hunt_on_enter(void* context) {
 
 bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
     WavehoundApp* app = context;
+
+    if(event.type == SceneManagerEventTypeTick) {
+        /* The target's IP (or the connection) may change after we enter, so keep
+         * the Down-key availability in step. If the link drops, the board has
+         * already stopped eliciting, so clear our indicator too. */
+        const bool avail = wh_scene_hunt_elicit_avail(app);
+        wh_hunt_view_set_elicit_available(app->hunt, avail);
+        if(!avail && s_elicit_on) {
+            s_elicit_on = false;
+            wh_hunt_view_set_elicit_on(app->hunt, false);
+        }
+        return false;
+    }
+
+    if(event.type == SceneManagerEventTypeCustom && event.event == WhEventElicitToggle) {
+        if(!wh_scene_hunt_elicit_avail(app)) return true; /* not connected / no IP */
+        s_elicit_on = !s_elicit_on;
+        if(s_elicit_on) {
+            char cmd[48];
+            snprintf(
+                cmd,
+                sizeof(cmd),
+                "ELICIT,%s,%u",
+                app->target.mac,
+                wh_settings_ping_interval_ms(app->settings.ping_interval));
+            wh_send(app, cmd);
+        } else {
+            wh_send(app, "ELICIT,STOP");
+        }
+        wh_hunt_view_set_elicit_on(app->hunt, s_elicit_on);
+        return true;
+    }
+
     if(event.type == SceneManagerEventTypeCustom && event.event == WhEventSaveTarget) {
         /* Remember the channel we are actually locked on (fall back to the
          * configured one, which may be 0 = auto), then name and save it. */
@@ -44,6 +91,8 @@ bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
 
 void wh_scene_hunt_on_exit(void* context) {
     WavehoundApp* app = context;
+    /* STOP also stops any elicitation on the board. */
+    s_elicit_on = false;
     wh_send(app, "STOP");
     /* Always release the enforce, regardless of the current setting: it is a
      * global display state, so toggling "Keep backlight" off between enter and
