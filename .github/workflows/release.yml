@@ -57,12 +57,15 @@ jobs:
 
       # Wireshark updates manuf weekly and asks not to fetch it more often, so
       # keep one copy per ISO week and download only on a miss. The toolchain key
-      # has the exact Python version: ESP-IDF's env in ~/.platformio is tied to it.
+      # has the exact Python version (ESP-IDF's env in ~/.platformio is tied to it)
+      # and only the platform / platform_packages pins from platformio.ini, so
+      # other edits there don't throw away the ~3 GB cache.
       - name: Cache keys
         id: keys
         run: |
           echo "manuf=manuf-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-          echo "toolchains=toolchains-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$FLIPPER_SDK-${{ hashFiles('firmware/platformio.ini') }}" >> "$GITHUB_OUTPUT"
+          pio=$(sed -nE 's/^(platform|platform_packages) *= *//p' firmware/platformio.ini | tr -s ' \n' '+' | sed 's/+$//')
+          echo "toolchains=toolchains-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$FLIPPER_SDK-$pio" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v6
         id: manuf
