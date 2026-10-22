@@ -550,6 +550,11 @@ static void elicit_task(void *arg)
             }
         }
         if (ip) {
+            /* TODO (see TODO.md): this sends BOTH an ARP request and an ICMP echo
+             * every interval, so a responsive target replies up to twice per
+             * interval -- ~2x the on-air frames. Kept for now (more reply frames
+             * = steadier hunt signal); the intended design was ARP-primary with
+             * ICMP only as a fallback. */
             s_arp_target = ip;
             tcpip_callback(tcpip_send_arp_one, NULL);
             icmp_echo(raw, ip);
