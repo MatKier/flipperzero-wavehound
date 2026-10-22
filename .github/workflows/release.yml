@@ -1,0 +1,119 @@
+# Build the Flipper app (with oui.db) and the board firmware.
+#
+# - push to any branch: build + package as a CI check. Runs can restore caches
+#   saved on their own branch or on the default branch (main); tag runs only the
+#   default branch's, so the large toolchain cache is saved there only. This
+#   week's manuf is saved on any branch.
+# - v<fap_version> tag: build, package and publish the GitHub release.
+# - workflow_dispatch: same files as a build artifact, no release.
+name: Build and release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  FLIPPER_SDK: "1.5.1"   # firmware SDK the app is built against (API 88.2)
+  UFBT_VERSION: "0.2.6"
+  PIO_VERSION: "6.2.0"
+  SAVE_TOOLCHAINS: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # PlatformIO builds ESP-IDF's Python env from this one. Not 3.15 yet: its
+      # pydantic-core has no 3.15 wheel and can't build from source (PyO3 <= 3.14).
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Check tag matches fap_version
+        if: github.ref_type == 'tag'
+        run: |
+          ver=$(sed -nE 's/^\s*fap_version="([^"]+)".*/\1/p' flipper_app/application.fam)
+          if [ "v$ver" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match fap_version $ver"
+            exit 1
+          fi
+
+      - name: Install ufbt and PlatformIO
+        run: pip install "ufbt==$UFBT_VERSION" "platformio==$PIO_VERSION"
+
+      # Wireshark updates manuf weekly and asks not to fetch it more often, so
+      # keep one copy per ISO week and download only on a miss.
+      - name: Cache keys
+        id: keys
+        run: |
+          echo "manuf=manuf-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+          echo "toolchains=toolchains-${{ runner.os }}-$FLIPPER_SDK-${{ hashFiles('firmware/platformio.ini') }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v6
+        id: manuf
+        with:
+          path: manuf.gz
+          key: ${{ steps.keys.outputs.manuf }}
+
+      - name: Fetch Wireshark manuf
+        if: steps.manuf.outputs.cache-hit != 'true'
+        run: curl -fsSL -o manuf.gz https://www.wireshark.org/download/automated/data/manuf.gz
+
+      # Saved right away, so a tag pushed while this run is still building can use it.
+      - uses: actions/cache/save@v6
+        if: github.ref_type == 'branch' && steps.manuf.outputs.cache-hit != 'true'
+        with:
+          path: manuf.gz
+          key: ${{ steps.keys.outputs.manuf }}
+
+      - uses: actions/cache/restore@v6
+        id: toolchains
+        with:
+          path: |
+            ~/.platformio
+            ~/.ufbt
+          key: ${{ steps.keys.outputs.toolchains }}
+
+      - name: Build Flipper app
+        run: |
+          gunzip -k manuf.gz
+          ufbt update --hw-target f7 --url "https://update.flipperzero.one/builds/firmware/$FLIPPER_SDK/flipper-z-f7-sdk-$FLIPPER_SDK.zip"
+          python3 build_app.py --manuf manuf
+
+      - name: Build board firmware
+        run: pio run -d firmware
+
+      - uses: actions/cache/save@v6
+        if: env.SAVE_TOOLCHAINS == 'true' && steps.toolchains.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.platformio
+            ~/.ufbt
+          key: ${{ steps.keys.outputs.toolchains }}
+
+      - name: Package
+        run: python3 tools/package_release.py --manuf manuf.gz -o dist --notes release-notes.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wavehound-${{ github.ref_name }}
+          path: dist/
+          retention-days: 7
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag --title "Wavehound $GITHUB_REF_NAME" --notes-file release-notes.md
