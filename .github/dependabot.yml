@@ -1,0 +1,8 @@
+# Open a PR when an action used in .github/workflows has a new release
+# (including new major versions, which the @vN tags don't pick up on their own).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
