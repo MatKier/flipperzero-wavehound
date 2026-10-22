@@ -200,7 +200,7 @@ static void handle_connect(char *args)
         return;
     }
     char ssid[33];
-    char psk[64];
+    char psk[65]; /* 64-char PSK + NUL */
     if (hex_decode(f[0], ssid, sizeof(ssid)) <= 0) {
         proto_sendf("ERR,bad ssid");
         return;

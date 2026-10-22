@@ -108,7 +108,8 @@ typedef struct {
     volatile bool connecting; /* a CONNECT / WPS is in flight */
     char ssid[WH_AP_SSID_MAX];
     char ip[16];
-    int fail_reason; /* last CONN,FAIL code */
+    int fail_reason;     /* last CONN,FAIL code */
+    char fail_msg[32];   /* human-readable last failure (CONN,FAIL / ERR / timeout) */
 } WhConn;
 
 typedef struct {

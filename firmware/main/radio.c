@@ -61,7 +61,7 @@ typedef struct {
     uint16_t dwell_ms;     /* discover: 0 = DISCOVER_DWELL_MS */
     bool has_bssid;        /* connect: mac[] holds a BSSID to lock onto */
     char ssid[33];         /* connect: AP SSID */
-    char psk[64];          /* connect: AP passphrase ("" = open) */
+    char psk[65];          /* connect: AP passphrase/PSK ("" = open); 64 + NUL */
 } radio_cmd_t;
 
 #define DEV_FLAG_AP 0x01         /* transmitted like an access point */

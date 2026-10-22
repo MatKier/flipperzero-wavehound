@@ -14,6 +14,10 @@ typedef enum {
 } ApcState;
 
 static ApcState s_state;
+static uint32_t s_ticks; /* WH_TICK_MS ticks spent connecting */
+
+/* Give up waiting after ~15 s (association + DHCP are normally a few seconds). */
+#define AP_CONNECT_TIMEOUT_TICKS (15000 / WH_TICK_MS)
 
 static void wh_scene_ap_connect_button_cb(GuiButtonType type, InputType it, void* context) {
     if(it != InputTypeShort) return;
@@ -41,7 +45,7 @@ static void wh_scene_ap_connect_render(WavehoundApp* app) {
         widget_add_string_element(w, 64, 42, AlignCenter, AlignTop, FontSecondary, line);
     } else if(s_state == ApcFail) {
         widget_add_string_element(w, 64, 12, AlignCenter, AlignTop, FontPrimary, "Failed");
-        snprintf(line, sizeof(line), "reason %d", app->conn.fail_reason);
+        snprintf(line, sizeof(line), "%s", app->conn.fail_msg[0] ? app->conn.fail_msg : "no response");
         widget_add_string_element(w, 64, 30, AlignCenter, AlignTop, FontSecondary, line);
         widget_add_string_element(w, 64, 42, AlignCenter, AlignTop, FontSecondary, "Back to retry");
         widget_add_button_element(w, GuiButtonTypeRight, "Skip", wh_scene_ap_connect_button_cb, app);
@@ -69,6 +73,7 @@ static void wh_scene_ap_connect_success(WavehoundApp* app) {
 void wh_scene_ap_connect_on_enter(void* context) {
     WavehoundApp* app = context;
     s_state = ApcConnecting;
+    s_ticks = 0;
     wh_scene_ap_connect_render(app);
     /* The lease may already be in (fast join); handle it on the next loop turn so
      * we don't navigate from within on_enter. */
@@ -79,6 +84,16 @@ void wh_scene_ap_connect_on_enter(void* context) {
 
 bool wh_scene_ap_connect_on_event(void* context, SceneManagerEvent event) {
     WavehoundApp* app = context;
+
+    if(event.type == SceneManagerEventTypeTick) {
+        if(s_state == ApcConnecting && ++s_ticks > AP_CONNECT_TIMEOUT_TICKS) {
+            snprintf(app->conn.fail_msg, sizeof(app->conn.fail_msg), "timeout");
+            app->conn.connecting = false;
+            s_state = ApcFail;
+            wh_scene_ap_connect_render(app);
+        }
+        return false;
+    }
     if(event.type != SceneManagerEventTypeCustom) return false;
 
     switch(event.event) {

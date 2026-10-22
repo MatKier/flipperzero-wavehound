@@ -77,6 +77,7 @@ void wh_ap_connect(WavehoundApp* app) {
     app->conn.connecting = true;
     app->conn.connected = false;
     app->conn.fail_reason = 0;
+    app->conn.fail_msg[0] = '\0';
     strlcpy(app->conn.ssid, app->clients_ap.name, sizeof(app->conn.ssid));
 
     /* CONNECT,<ssid_hex>,<psk_hex>,<bssid>,<ch> -- pass the AP's BSSID/channel so
@@ -232,6 +233,7 @@ static void wh_on_line(char* line, void* context) {
             view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnGotIp);
         } else if(strcmp(state, "FAIL") == 0) {
             app->conn.fail_reason = field_int(&cur);
+            snprintf(app->conn.fail_msg, sizeof(app->conn.fail_msg), "wifi %d", app->conn.fail_reason);
             app->conn.connecting = false;
             app->conn.connected = false;
             view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnFail);
@@ -258,8 +260,18 @@ static void wh_on_line(char* line, void* context) {
             view_dispatcher_send_custom_event(app->view_dispatcher, WhEventWpsFail);
         }
         /* ACTIVE: the WPS scene already shows "press the button". */
+    } else if(strcmp(tag, "ERR") == 0) {
+        /* A command was rejected. While connecting, it's our CONNECT (e.g. a bad
+         * passphrase) -- surface it instead of waiting forever. */
+        if(app->conn.connecting) {
+            const char* reason = next_field(&cur);
+            strlcpy(app->conn.fail_msg, reason ? reason : "rejected", sizeof(app->conn.fail_msg));
+            app->conn.connecting = false;
+            app->conn.connected = false;
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnFail);
+        }
     }
-    /* OK / ERR and other lines only refresh the liveness timestamp. */
+    /* OK and other lines only refresh the liveness timestamp. */
 }
 
 /* Hunt view asks (Right key) to save the current target. */
