@@ -1,8 +1,8 @@
 # Build the Flipper app (with oui.db) and the board firmware.
 #
 # - push to any branch: build + package as a CI check. Runs can restore caches
-#   saved on their own branch or on main; tag runs only main's, so the large
-#   toolchain cache is saved on main only. This week's manuf is saved on any branch.
+#   saved on their own branch or on the default branch (main); tag runs only the
+#   default branch's, so the large toolchain cache is saved there only. This week's manuf is saved on any branch.
 # - v<fap_version> tag: build, package and publish the GitHub release.
 # - workflow_dispatch: same files as a build artifact, no release.
 name: Build and release
@@ -24,7 +24,7 @@ env:
   FLIPPER_SDK: "1.5.1"   # firmware SDK the app is built against (API 88.2)
   UFBT_VERSION: "0.2.6"
   PIO_VERSION: "6.2.0"
-  SAVE_TOOLCHAINS: ${{ github.ref == 'refs/heads/main' }}
+  SAVE_TOOLCHAINS: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
 jobs:
   build:
