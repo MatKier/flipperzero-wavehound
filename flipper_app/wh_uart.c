@@ -6,7 +6,11 @@
 
 #define WH_UART_BAUD 115200
 #define WH_RX_BUF_SIZE 1024
-#define WH_LINE_MAX 160
+/* Must hold the board's longest line: WPS,OK,<ssid_hex>,<psk_hex> is up to
+ * 7 + 64 + 1 + 128 = 200 chars (32-byte SSID, 64-byte PSK, hex-encoded). Match
+ * the board's own LINE_MAX (256) so a long credential line is never truncated
+ * -- a truncated psk_hex decodes to a silently wrong saved password. */
+#define WH_LINE_MAX 256
 #define WH_PING_INTERVAL_MS 1500
 #define WH_ALIVE_TIMEOUT_MS 4000
 

@@ -326,7 +326,12 @@ static void wh_on_line(char* line, void* context) {
             char ssid[WH_AP_SSID_MAX] = "";
             if(ssid_hex) wh_hex_decode(ssid_hex, ssid, sizeof(ssid));
             if(ssid[0]) strlcpy(app->conn.ssid, ssid, sizeof(app->conn.ssid));
-            if(psk_hex) wh_hex_decode(psk_hex, app->psk_buf, sizeof(app->psk_buf));
+            /* On a malformed/incomplete psk_hex, clear psk_buf rather than keep a
+             * partial password -- the save offer is gated on psk_buf[0], so an
+             * empty one is simply not offered (the join still proceeds). */
+            if(!psk_hex || wh_hex_decode(psk_hex, app->psk_buf, sizeof(app->psk_buf)) < 0) {
+                app->psk_buf[0] = '\0';
+            }
             app->login_pending_save = true; /* offer to save after the join succeeds */
             view_dispatcher_send_custom_event(app->view_dispatcher, WhEventWpsOk);
         } else if(strcmp(state, "FAIL") == 0) {

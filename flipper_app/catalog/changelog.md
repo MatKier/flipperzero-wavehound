@@ -1,3 +1,10 @@
+## v1.15
+
+- Fixed a bug where logging in to an access point by **WPS** could save a wrong
+  Wi-Fi password: a long WPS credential line from the board overran the app's
+  receive buffer and was truncated, so the stored password came out incomplete
+  and later "Connect (saved)" would fail. Longer passwords now arrive intact.
+
 ## v1.14
 
 - **Hunt silent devices by logging in to their access point.** From *Hunt
