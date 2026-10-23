@@ -97,6 +97,15 @@ typedef struct {
     char host[33]; /* best-effort hostname, else empty */
 } WhTarget;
 
+/** An IP/host learned before its device row existed (ARP replies can beat the
+ * client scan, and the post-login subnet sweep runs before the client list is
+ * open). Held until the matching row appears, then copied into it. */
+typedef struct {
+    char mac[18];
+    char ip[16];
+    char host[33];
+} WhPendingIp;
+
 /** A saved AP credential, persisted to the SD card (plaintext, like saved MACs). */
 typedef struct {
     char ssid[WH_AP_SSID_MAX];
@@ -144,6 +153,11 @@ typedef struct {
      * of clearing them (re-sent MACs update in place, so rows stay matched to
      * their slot). A count, so back-to-back resumes can't lose one. */
     uint8_t results_keep_begins;
+
+    /* IPs that arrived before their row (guarded by results_mutex); applied when
+     * the row is created, cleared when the link drops. */
+    WhPendingIp pending_ips[WH_MAX_RESULTS];
+    size_t pending_ip_count;
 
     WhSearchKind search_kind;
 

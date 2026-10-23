@@ -145,6 +145,15 @@ static WhTarget* wh_results_slot(WavehoundApp* app, const char* mac) {
     if(app->result_count >= WH_MAX_RESULTS) return NULL;
     WhTarget* t = &app->results[app->result_count++];
     memset(t, 0, sizeof(WhTarget));
+    /* Apply (and consume) an IP that arrived before this row existed. */
+    for(size_t i = 0; i < app->pending_ip_count; i++) {
+        if(strcmp(app->pending_ips[i].mac, mac) == 0) {
+            strlcpy(t->ip, app->pending_ips[i].ip, sizeof(t->ip));
+            strlcpy(t->host, app->pending_ips[i].host, sizeof(t->host));
+            app->pending_ips[i] = app->pending_ips[--app->pending_ip_count];
+            break;
+        }
+    }
     return t;
 }
 
@@ -214,11 +223,34 @@ static void wh_on_line(char* line, void* context) {
         if(host_hex) wh_hex_decode(host_hex, host, sizeof(host));
 
         furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+        bool matched = false;
         for(size_t i = 0; i < app->result_count; i++) {
             if(strcmp(app->results[i].mac, mac) == 0) {
                 strlcpy(app->results[i].ip, ip, sizeof(app->results[i].ip));
                 if(host[0]) strlcpy(app->results[i].host, host, sizeof(app->results[i].host));
+                matched = true;
                 break;
+            }
+        }
+        if(!matched) {
+            /* The row doesn't exist yet (sweep ran before the list opened, or the
+             * ARP reply beat the client scan): remember it, keyed by MAC, and
+             * wh_results_slot() applies it when the row appears. */
+            WhPendingIp* p = NULL;
+            for(size_t i = 0; i < app->pending_ip_count; i++) {
+                if(strcmp(app->pending_ips[i].mac, mac) == 0) {
+                    p = &app->pending_ips[i];
+                    break;
+                }
+            }
+            if(!p && app->pending_ip_count < WH_MAX_RESULTS) {
+                p = &app->pending_ips[app->pending_ip_count++];
+                p->host[0] = '\0';
+            }
+            if(p) {
+                strlcpy(p->mac, mac, sizeof(p->mac));
+                strlcpy(p->ip, ip, sizeof(p->ip));
+                if(host[0]) strlcpy(p->host, host, sizeof(p->host));
             }
         }
         furi_mutex_release(app->results_mutex);
@@ -266,6 +298,10 @@ static void wh_on_line(char* line, void* context) {
             app->conn.connecting = false;
             app->conn.connected = false;
             app->conn.ip[0] = '\0';
+            /* The subnet is gone: any pending IPs are stale. */
+            furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+            app->pending_ip_count = 0;
+            furi_mutex_release(app->results_mutex);
         }
         /* ASSOC is layer-2 only: nothing to show until GOTIP. */
     } else if(strcmp(tag, "WPS") == 0) {
