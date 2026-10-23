@@ -95,6 +95,14 @@ After a successful join you can save the password to **Saved APs** for next
 time. The client list and the hunt screen then show each device's **IP** and,
 when it can be resolved, a **hostname** (best-effort reverse-DNS, then NBNS).
 
+Discovery stays radio-first either way: the client list is built only from
+devices actually heard over the air, keyed by MAC. Logging in adds a background
+ARP sweep that fills in each heard device's IP and hostname — it only
+*annotates* those rows, never adding a host you haven't heard, so anything known
+only from the router's relayed reply (including wired devices on the same
+network) is deliberately left off. A client still has to transmit to appear and
+to be hunted; the elicitation ping below is what coaxes a quiet one into doing so.
+
 On the hunt screen, **Down** toggles the **elicitation ping**: a rate-limited
 unicast request (ARP, plus an ICMP echo) sent to the one target you are hunting,
 just often enough that it answers and you get a steady stream of frames to
