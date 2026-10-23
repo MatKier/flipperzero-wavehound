@@ -10,14 +10,18 @@
 typedef enum {
     ApcConnecting,
     ApcFail,
+    ApcSuccess, /* brief "Connected" splash, then on to the client list */
     ApcSave,
 } ApcState;
 
 static ApcState s_state;
-static uint32_t s_ticks; /* WH_TICK_MS ticks spent connecting */
+static uint32_t s_ticks; /* WH_TICK_MS ticks spent in the current state */
 
 /* Give up waiting after ~15 s (association + DHCP are normally a few seconds). */
 #define AP_CONNECT_TIMEOUT_TICKS (15000 / WH_TICK_MS)
+
+/* How long the "Connected" splash lingers before it continues on its own. */
+#define AP_CONNECT_SPLASH_TICKS (1500 / WH_TICK_MS)
 
 static void wh_scene_ap_connect_button_cb(GuiButtonType type, InputType it, void* context) {
     if(it != InputTypeShort) return;
@@ -49,6 +53,13 @@ static void wh_scene_ap_connect_render(WavehoundApp* app) {
         widget_add_string_element(w, 64, 30, AlignCenter, AlignTop, FontSecondary, line);
         widget_add_string_element(w, 64, 42, AlignCenter, AlignTop, FontSecondary, "Back to retry");
         widget_add_button_element(w, GuiButtonTypeRight, "Skip", wh_scene_ap_connect_button_cb, app);
+    } else if(s_state == ApcSuccess) {
+        widget_add_string_element(w, 64, 12, AlignCenter, AlignTop, FontPrimary, "Connected");
+        snprintf(line, sizeof(line), "%s", wh_scene_ap_connect_ssid(app));
+        widget_add_string_element(w, 64, 30, AlignCenter, AlignTop, FontSecondary, line);
+        if(app->conn.ip[0]) {
+            widget_add_string_element(w, 64, 42, AlignCenter, AlignTop, FontSecondary, app->conn.ip);
+        }
     } else { /* ApcSave */
         widget_add_string_element(w, 64, 10, AlignCenter, AlignTop, FontPrimary, "Connected");
         widget_add_string_element(
@@ -62,12 +73,12 @@ static void wh_scene_ap_connect_render(WavehoundApp* app) {
 }
 
 static void wh_scene_ap_connect_success(WavehoundApp* app) {
-    if(app->login_pending_save && app->psk_buf[0]) {
-        s_state = ApcSave;
-        wh_scene_ap_connect_render(app);
-    } else {
-        wh_ap_login_proceed(app); /* straight to the client list */
-    }
+    /* Every successful join shows the brief Connected / SSID / IP splash first;
+     * the tick handler then either offers to save a fresh password or continues
+     * straight to the client list. */
+    s_state = ApcSuccess;
+    s_ticks = 0;
+    wh_scene_ap_connect_render(app);
 }
 
 void wh_scene_ap_connect_on_enter(void* context) {
@@ -91,6 +102,14 @@ bool wh_scene_ap_connect_on_event(void* context, SceneManagerEvent event) {
             app->conn.connecting = false;
             s_state = ApcFail;
             wh_scene_ap_connect_render(app);
+        } else if(s_state == ApcSuccess && ++s_ticks > AP_CONNECT_SPLASH_TICKS) {
+            /* Splash done: offer to save a freshly entered password, else go on. */
+            if(app->login_pending_save && app->psk_buf[0]) {
+                s_state = ApcSave;
+                wh_scene_ap_connect_render(app);
+            } else {
+                wh_ap_login_proceed(app); /* on to the client list */
+            }
         }
         return false;
     }
