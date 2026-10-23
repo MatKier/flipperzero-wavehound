@@ -11,7 +11,9 @@
 #define PROTO_UART UART_NUM_0
 #define PROTO_RX_BUF 1024
 #define PROTO_TX_BUF 2048
-#define PROTO_LINE_MAX 160
+/* Long enough for the longest line, the CONNECT command, whose hex-encoded SSID
+ * and PSK fields can reach ~220 chars (see docs/PROTOCOL.md). */
+#define PROTO_LINE_MAX 256
 
 static SemaphoreHandle_t s_tx_lock;
 
@@ -50,6 +52,18 @@ void proto_sendf(const char *fmt, ...)
     xSemaphoreTake(s_tx_lock, portMAX_DELAY);
     uart_write_bytes(PROTO_UART, line, len);
     xSemaphoreGive(s_tx_lock);
+}
+
+void proto_hex_encode(const char *src, size_t len, char *out, size_t out_sz)
+{
+    static const char digits[] = "0123456789abcdef";
+    size_t n = 0;
+    for (size_t i = 0; i < len && n + 2 < out_sz; i++) {
+        const unsigned char b = (unsigned char)src[i];
+        out[n++] = digits[b >> 4];
+        out[n++] = digits[b & 0x0f];
+    }
+    out[n] = '\0';
 }
 
 size_t proto_read_line(char *buf, size_t size)

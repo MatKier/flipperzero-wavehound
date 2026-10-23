@@ -16,6 +16,7 @@
 #include "esp_timer.h"
 
 #include "proto.h"
+#include "radio.h"
 
 static const char *reset_reason_str(void)
 {
@@ -139,6 +140,12 @@ void info_report(void)
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     proto_sendf("BI,MAC,%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
                 mac[5]);
+
+    /* Station association: the AP we joined and our lease ("-" when not up). */
+    char assoc[33], ip[16];
+    radio_conn_summary(assoc, sizeof(assoc), ip, sizeof(ip));
+    proto_sendf("BI,Assoc,%s", assoc);
+    proto_sendf("BI,IP,%s", ip);
 
     uint32_t flash = 0;
     if (esp_flash_get_size(NULL, &flash) == ESP_OK) {

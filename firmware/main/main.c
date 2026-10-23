@@ -20,7 +20,9 @@
 #include "proto.h"
 #include "radio.h"
 
-#define LINE_MAX 96
+/* Long enough for the biggest command: CONNECT carries a hex-encoded SSID and
+ * PSK (up to 32 + 63 bytes -> ~220 chars). See docs/PROTOCOL.md. */
+#define LINE_MAX 256
 
 /* Bounds for the optional timing tokens (DWELL=<ms>, LOST=<s>). */
 #define DWELL_MIN_MS 100
@@ -38,6 +40,37 @@ static bool parse_mac(const char *s, uint8_t mac[6])
         mac[i] = (uint8_t)b[i];
     }
     return true;
+}
+
+static int hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* Decode an even-length hex string into out (NUL-terminated, at most out_sz-1
+ * bytes). Returns the byte count, or -1 on non-hex, odd-length or oversized
+ * input. An empty string decodes to "" (0 bytes). Free-text fields (SSID, PSK)
+ * travel hex-encoded so a comma or space in them can't break the line protocol. */
+static int hex_decode(const char *s, char *out, size_t out_sz)
+{
+    size_t n = 0;
+    while (s[0]) {
+        const int hi = hex_nibble(s[0]);
+        const int lo = hex_nibble(s[1]); /* s[1] may be the NUL terminator */
+        if (hi < 0 || lo < 0) {
+            return -1;
+        }
+        if (n + 1 >= out_sz) {
+            return -1;
+        }
+        out[n++] = (char)((hi << 4) | lo);
+        s += 2;
+    }
+    out[n] = '\0';
+    return (int)n;
 }
 
 /* Split comma-separated args in place. Returns the number of fields found. */
@@ -156,6 +189,76 @@ static void handle_discover(char *args)
                    (uint16_t)t.dwell_ms);
 }
 
+static void handle_connect(char *args)
+{
+    /* args: "<ssid_hex>,<psk_hex>[,<bssid>][,<ch>]". The two optional fields are
+     * told apart by the ':' in a BSSID, so their order does not matter. */
+    char *f[4] = {0};
+    int n = split_args(args, f, 4);
+    if (n < 2) {
+        proto_sendf("ERR,usage CONNECT,<ssid_hex>,<psk_hex>[,<bssid>][,<ch>]");
+        return;
+    }
+    char ssid[33];
+    char psk[65]; /* 64-char PSK + NUL */
+    if (hex_decode(f[0], ssid, sizeof(ssid)) <= 0) {
+        proto_sendf("ERR,bad ssid");
+        return;
+    }
+    if (hex_decode(f[1], psk, sizeof(psk)) < 0) {
+        proto_sendf("ERR,bad psk");
+        return;
+    }
+    uint8_t bssid[6];
+    bool has_bssid = false;
+    int ch = 0;
+    for (int i = 2; i < n; i++) {
+        if (strchr(f[i], ':')) {
+            if (!parse_mac(f[i], bssid)) {
+                proto_sendf("ERR,bad bssid");
+                return;
+            }
+            has_bssid = true;
+        } else if (!parse_channel(f[i], &ch) || ch == 0) {
+            proto_sendf("ERR,bad channel");
+            return;
+        }
+    }
+    proto_sendf("OK,CONNECT");
+    radio_connect(ssid, psk, has_bssid ? bssid : NULL, (uint8_t)ch);
+}
+
+static void handle_wps(char *args)
+{
+    /* "WPS" starts PBC enrolment; "WPS,STOP" cancels it. */
+    if (args && strcasecmp(args, "STOP") == 0) {
+        radio_wps_stop();
+    } else {
+        radio_wps_start();
+    }
+    proto_sendf("OK,WPS");
+}
+
+static void handle_elicit(char *args)
+{
+    /* "ELICIT,<mac>,<ms>" starts; "ELICIT,STOP" stops. */
+    char *f[2] = {0};
+    int n = split_args(args, f, 2);
+    if (n >= 1 && strcasecmp(f[0], "STOP") == 0) {
+        radio_elicit_stop();
+        proto_sendf("OK,ELICIT");
+        return;
+    }
+    uint8_t mac[6];
+    if (n < 2 || !parse_mac(f[0], mac)) {
+        proto_sendf("ERR,usage ELICIT,<mac>,<ms> | ELICIT,STOP");
+        return;
+    }
+    if (radio_elicit_start(mac, (uint16_t)atoi(f[1]))) {
+        proto_sendf("OK,ELICIT");
+    }
+}
+
 static void handle_line(char *line)
 {
     char *args = strchr(line, ',');
@@ -175,6 +278,20 @@ static void handle_line(char *line)
         radio_spectrum();
     } else if (strcmp(line, "DISCOVER") == 0) {
         handle_discover(args);
+    } else if (strcmp(line, "CONNECT") == 0) {
+        handle_connect(args);
+    } else if (strcmp(line, "DISCONNECT") == 0) {
+        radio_disconnect();
+        proto_sendf("OK,DISCONNECT");
+    } else if (strcmp(line, "WPS") == 0) {
+        handle_wps(args);
+    } else if (strcmp(line, "ELICIT") == 0) {
+        handle_elicit(args);
+    } else if (strcmp(line, "RESOLVE") == 0) {
+        /* Re-run host discovery; any resolved IP/host streams back as IP lines.
+         * An optional MAC arg (RESOLVE,<mac>) is ignored -- the sweep is
+         * subnet-wide -- but accepted for forward compatibility. */
+        radio_resolve();
     } else if (strcmp(line, "INFO") == 0) {
         info_report();
     } else if (strcmp(line, "STOP") == 0) {

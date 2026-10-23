@@ -1,3 +1,27 @@
+## v1.14
+
+- **Hunt silent devices by logging in to their access point.** From *Hunt
+  devices > Clients of nearby AP*, you can now log the board in to the chosen
+  network (saved password, typed password, WPS push-button or open), then hunt a
+  client that rarely transmits.
+- On the hunt screen, **Down** toggles an **elicitation ping**: a rate-limited
+  unicast request to the single target you are hunting, just enough that it
+  answers and you get a steady signal to measure. It is capped and aimed at one
+  MAC — not a flood.
+- The client list and hunt screen now show each device's **IP** and, when it can
+  be resolved, a **hostname**. Discovery now probes the network a few times so
+  devices that were briefly asleep still turn up, retries name lookups that
+  first came back empty, and keeps trying to resolve a hunt target's IP while
+  you hunt it, so elicitation becomes available once it answers.
+- New **Saved APs** menu to edit or delete saved access-point passwords.
+- New **Ping interval** setting (50 ms–1 s, default 250 ms) for the elicitation
+  ping.
+- Logging in transmits and joins a network (everything else stays
+  receive-only), so use it only on a network you are authorized to use. Saved
+  passwords are plaintext on the SD card. Login needs board firmware v9 or
+  newer and the elicitation ping needs v12 or newer; the login options are
+  hidden on older firmware.
+
 ## v1.13
 
 - The MAC vendor database is now part of the source, so apps installed from the

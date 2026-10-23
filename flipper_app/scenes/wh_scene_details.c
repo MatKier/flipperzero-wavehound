@@ -21,7 +21,21 @@ void wh_scene_details_on_enter(void* context) {
     Widget* w = app->widget;
     widget_reset(w);
 
-    const char* title = t->name[0] ? t->name : (t->is_ap ? "(hidden AP)" : "(device)");
+    /* Identity line: an AP shows its SSID (its row can pick up the gateway IP,
+     * so IP must not win there); a station prefers its resolved host / IP when
+     * known, matching the client list and hunt header. */
+    const char* title;
+    if(t->is_ap) {
+        title = t->name[0] ? t->name : "(hidden AP)";
+    } else if(t->host[0]) {
+        title = t->host;
+    } else if(t->ip[0]) {
+        title = t->ip;
+    } else if(t->name[0]) {
+        title = t->name;
+    } else {
+        title = "(device)";
+    }
     widget_add_string_element(w, 0, 11, AlignLeft, AlignBottom, FontPrimary, title);
     widget_add_string_element(w, 0, 23, AlignLeft, AlignBottom, FontSecondary, t->mac);
 

@@ -32,6 +32,7 @@ typedef enum {
 #define WH_HOP_DWELL_COUNT 6
 #define WH_RESEARCH_COUNT 5
 #define WH_SCAN_DWELL_COUNT 5
+#define WH_PING_INTERVAL_COUNT 5
 
 /** User preferences, persisted to the SD card. */
 typedef struct {
@@ -45,6 +46,7 @@ typedef struct {
     uint8_t hop_dwell;       /* preset index: per-channel dwell while a hunt searches */
     uint8_t research;        /* preset index: silence before a locked hunt searches again */
     uint8_t scan_dwell;      /* preset index: per-channel dwell while scanning */
+    uint8_t ping_interval;   /* preset index: elicitation ping interval */
 } WhSettings;
 
 /** Fill `s` with the default settings. */
@@ -64,3 +66,6 @@ uint16_t wh_settings_research_s(uint8_t idx);
 
 /** Scan (DISCOVER) dwell per channel, in ms, for a scan_dwell preset. */
 uint16_t wh_settings_scan_dwell_ms(uint8_t idx);
+
+/** Elicitation ping interval, in ms, for a ping_interval preset. */
+uint16_t wh_settings_ping_interval_ms(uint8_t idx);

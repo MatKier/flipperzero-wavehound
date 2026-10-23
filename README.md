@@ -21,8 +21,10 @@ Typical uses:
 - Locate your own lost phone, smart plug or camera by its MAC.
 - See which 2.4 GHz channel is least congested before you configure your router.
 
-Wavehound is **receive-only**: it reads frame headers to measure signal strength
-and never transmits. It ships its own board firmware rather than building on
+Wavehound is **receive-only by default**: it reads frame headers to measure
+signal strength and never transmits — with one opt-in exception for hunting
+devices that are almost always silent (see [Hunting silent
+devices](#hunting-silent-devices-optional)). It ships its own board firmware rather than building on
 [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) because of what
 Marauder's fox hunt leaves out on a screenless board like the WiFi dev board: its
 channel logic — park on the target's channel, sweep to find it, re-acquire when
@@ -57,17 +59,57 @@ board, not about where the code can run.)
 | **Hunt devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP scan so you can pick a network and then lists only the stations associated with it, on its channel. The list then fills live, with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
 | **Enter MAC** | Type a MAC on the hex keypad (pre-filled with your last target), then pick the channel the same way: **Auto (hop until heard)**, a channel number, or a nearby AP's channel. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
 | **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel, and signal. For access points it also shows the security (Open/WEP/WPA/WPA2/WPA3) and 802.11 mode (g/n/ac/ax), e.g. `AP ch6 WPA2 n -52dBm`. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution needs the `oui.db` database; without it, other MACs show "Unknown" (see [Vendor database](#vendor-database)). (Security and 802.11 mode need board firmware v7.) |
-| **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout with the frame rate (frames/s) beside it, a COLD/COOL/WARM/HOT! label with a trend arrow for whether the signal is rising or falling as you move, a meter with peak and noise-floor markers, the noise floor value (`nf`), and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels; once a heard target goes quiet, a `quiet Ns` timer counts the silence, and after 8 s (configurable as **Re-search**) it hops again to re-find the target. Press **Right** to save the current target as a named favorite. An optional haptic buzz, a kept-on backlight and the meter's Near/Normal/Far range are all configurable under **Settings**. (The noise floor needs board firmware v6.) |
+| **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout with the frame rate (frames/s) beside it, a COLD/COOL/WARM/HOT! label with a trend arrow for whether the signal is rising or falling as you move, a meter with peak and noise-floor markers, the noise floor value (`nf`), and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels; once a heard target goes quiet, a `quiet Ns` timer counts the silence, and after 8 s (configurable as **Re-search**) it hops again to re-find the target. Press **Right** to save the current target as a named favorite. When you are logged in to the target's access point and its IP is known, the header shows the device's IP (or resolved hostname) and **Down** toggles an elicitation ping to coax frames out of a silent device (see [Hunting silent devices](#hunting-silent-devices-optional)). An optional haptic buzz, a kept-on backlight and the meter's Near/Normal/Far range are all configurable under **Settings**. (The noise floor needs board firmware v6.) |
 | **Saved MACs** | Favorites you saved from the hunt screen, kept on the SD card (`/ext/apps_data/wavehound/saved.txt`). Pick one for **Hunt / Edit / Delete**. Hunt opens the channel picker with the saved channel pre-selected, so you can accept it, choose another, or switch to Auto. Edit fixes the name, MAC or channel (each field pre-filled). Delete removes it. Saving a randomized (`*`) MAC is of little use since it rotates. |
+| **Saved APs** | Access-point passwords you chose to save during login (see [Hunting silent devices](#hunting-silent-devices-optional)), kept on the SD card (`/ext/apps_data/wavehound/aps.txt`). Pick one to **Edit password** or **Delete**. Credentials are stored in plaintext, exactly like saved MACs — the Flipper SD card is not encrypted, so treat it accordingly. |
 | **Channel spectrum** | The board sweeps channels 1–13 (120 ms dwell each) in promiscuous mode. The Flipper draws one bar per channel with peak hold, a sweep cursor, the busiest channel, and the number of distinct transmitters heard per sweep. You can switch the metric between packets, max dBm and bytes. |
 | **Board info** | Ask the board about itself: firmware build (date + ELF hash), the ESP-IDF version actually running, chip model/revision/cores, radio features, factory MAC, flash size, the app partition and how much of it the current firmware uses, free/min heap, uptime, chip temperature and the last reset reason (handy for spotting brownouts from the 5 V boost). |
-| **Settings** | Tweak how the hunt behaves; kept on the SD card (`/ext/apps_data/wavehound/settings.txt`). **Click volume** (0.1–1.0) sets the Geiger click loudness. **Sound** (On/Muted) is the hunt screen's starting mute state. **Saved hunt ch** (Saved / Auto-hop / Nearby AP) is which channel option is pre-selected when you hunt a saved MAC. **Range** (Near / Normal / Far) shifts the dBm window the meter spans — Near −75..−25, Normal −95..−30, Far −100..−50 — and so retunes the click and haptic rate. **Haptic** (Off/On) buzzes the Flipper as a proximity cue, faster as the signal strengthens (works even when muted). **Keep backlight** (Off/On) holds the backlight on while a hunt is on screen. **Hop dwell** (100 ms–2 s, default 300 ms) is how long a hunt stays on each channel while searching for the target: shorter finds an access point faster, longer catches quiet stations. **Re-search** (4–60 s, default 8 s) is how long a locked hunt tolerates silence before searching the channels again. **Response** (Fast / Normal / Smooth) sets how quickly the meter follows the signal. **Scan dwell** (120 ms–2 s) is how long a scan stays on each channel. **Reset to defaults** restores everything. (The three timing settings need board firmware v8; older firmware keeps 300 ms / 8 s / 120 ms.) |
+| **Settings** | Tweak how the hunt behaves; kept on the SD card (`/ext/apps_data/wavehound/settings.txt`). **Click volume** (0.1–1.0) sets the Geiger click loudness. **Sound** (On/Muted) is the hunt screen's starting mute state. **Saved hunt ch** (Saved / Auto-hop / Nearby AP) is which channel option is pre-selected when you hunt a saved MAC. **Range** (Near / Normal / Far) shifts the dBm window the meter spans — Near −75..−25, Normal −95..−30, Far −100..−50 — and so retunes the click and haptic rate. **Haptic** (Off/On) buzzes the Flipper as a proximity cue, faster as the signal strengthens (works even when muted). **Keep backlight** (Off/On) holds the backlight on while a hunt is on screen. **Hop dwell** (100 ms–2 s, default 300 ms) is how long a hunt stays on each channel while searching for the target: shorter finds an access point faster, longer catches quiet stations. **Re-search** (4–60 s, default 8 s) is how long a locked hunt tolerates silence before searching the channels again. **Response** (Fast / Normal / Smooth) sets how quickly the meter follows the signal. **Scan dwell** (120 ms–2 s) is how long a scan stays on each channel. **Ping interval** (50 ms / 100 ms / 250 ms / 500 ms / 1 s, default 250 ms) is how often the optional elicitation ping pokes a silent target (see [Hunting silent devices](#hunting-silent-devices-optional)). **Reset to defaults** restores everything. (The three timing settings need board firmware v8; older firmware keeps 300 ms / 8 s / 120 ms.) |
 
 Controls:
 
-- **Hunt:** OK = mute/unmute, Left = reset peak, Right = save target, Back = return to the list
+- **Hunt:** OK = mute/unmute, Left = reset peak, Right = save target, Down = toggle the elicitation ping (only when logged in and the IP is known), Back = return to the list
 - **Target list (live scan):** scroll and pick any entry while scanning continues; the first entry, "~ Search again", clears the list and restarts the scan; Back stops scanning and returns
 - **Spectrum:** OK/Left/Right = change metric, Back = return to menu
+
+## Hunting silent devices (optional)
+
+A device that rarely transmits gives almost no RSSI samples, so it is hard to
+locate. If the device is a client of an access point **you are authorized to
+use**, Wavehound can log the board in to that network and gently prompt the
+target to reply, turning a silent device into a locatable one.
+
+From **Hunt devices → Clients of nearby AP…**, pick the network and you are
+offered a login before its client list is shown:
+
+- **Connect (saved)** — use a password saved earlier (shown only if one exists).
+- **Enter password** — type the Wi-Fi password. The stock Flipper keyboard is
+  alphanumeric plus `_`, so passwords with other symbols can't be typed by hand;
+  use WPS or a saved password for those.
+- **WPS (push button)** — press the WPS button on the router; the board enrols
+  and captures the credentials.
+- **Connect (open)** — for an open network.
+- **Skip** — just list the clients, without logging in.
+
+After a successful join you can save the password to **Saved APs** for next
+time. The client list and the hunt screen then show each device's **IP** and,
+when it can be resolved, a **hostname** (best-effort reverse-DNS, then NBNS).
+
+On the hunt screen, **Down** toggles the **elicitation ping**: a rate-limited
+unicast request (ARP, plus an ICMP echo) sent to the one target you are hunting,
+just often enough that it answers and you get a steady stream of frames to
+measure. The rate is capped and set by **Ping interval** in Settings
+(50 ms–1 s); the board sends to a single MAC and nothing else. This is **not** a
+flood or a denial-of-service tool, and it is deliberately built so it cannot be
+turned into one.
+
+> **Authorized use only.** Logging in transmits and joins a network, unlike the
+> rest of Wavehound. Only do this on a network you own or are explicitly
+> authorized to use, against a device you are authorized to locate. Saved
+> passwords are stored in plaintext on the (unencrypted) SD card. Login appears
+> with board firmware v9 or newer and the elicitation ping needs v12 or newer;
+> the login options are hidden on older firmware. (Prebuilt releases ship the
+> matching firmware.)
 
 ## Layout
 
@@ -84,8 +126,10 @@ flipper_app/  Flipper external app (uFBT)
   scenes/                 one file per screen (start, channel select,
                           target list, details, MAC input, hunt, spectrum,
                           board info, name input, saved MACs, saved entry,
-                          edit saved, settings, about)
+                          edit saved, AP login, AP password, AP WPS,
+                          AP connect, saved APs, saved AP entry, settings, about)
   wh_store.c              saved MACs: load/add/update/delete on the SD card
+  wh_ap_store.c           saved AP passwords: load/add/delete on the SD card
   wh_settings.c           app settings: load/save on the SD card
   wh_oui.c                vendor lookup from the SD oui.db
   views/wh_hunt_view.c    hunt screen + Geiger click thread
@@ -290,9 +334,12 @@ This code is AI-assisted: much of it was written with the help of AI tools.
 Review it yourself before trusting it or flashing it to your hardware.
 
 Only locate networks and devices you own or are explicitly authorized to locate,
-and only on your own network. Wavehound is receive-only, and passive reception is
-legal in most places, but radio and privacy rules vary by jurisdiction. Checking
-what you are allowed to do, and getting permission first, is up to you.
+and only on your own network. Wavehound is receive-only except for the optional
+AP login described above, which associates with a network and sends a
+rate-limited unicast ping to a single target you choose — use it only on a
+network you are authorized to join. Passive reception is legal in most places,
+but radio and privacy rules vary by jurisdiction. Checking what you are allowed
+to do, and getting permission first, is up to you.
 
 ## License
 

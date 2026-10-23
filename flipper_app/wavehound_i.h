@@ -23,6 +23,17 @@
 #define WH_MAX_CHANNEL 13
 #define WH_MAX_SAVED 64
 #define WH_SAVED_NAME_MAX 24
+#define WH_AP_SSID_MAX 33  /* 32 bytes + NUL */
+#define WH_AP_PSK_MAX 65   /* 64 bytes + NUL (WPA passphrase or 64-hex PSK) */
+#define WH_MAX_SAVED_AP 32
+
+/* The board firmware version at which AP login (CONNECT/WPS/ELICIT) appeared;
+ * the login UI is hidden for older boards (which answer those commands ERR). */
+#define WH_FW_LOGIN_MIN 9
+
+/* The board firmware version at which the RESOLVE command appeared; the hunt
+ * screen only asks older boards to re-resolve if they understand it. */
+#define WH_FW_RESOLVE_MIN 15
 
 typedef enum {
     WhViewSubmenu,
@@ -43,6 +54,15 @@ typedef enum {
     WhEventDetailsHunt,
     WhEventDetailsSave,
     WhEventSettingsReset,
+    /* AP login (the "Clients of nearby AP" path). */
+    WhEventPskEntered,  /* password keyboard finished */
+    WhEventConnGotIp,   /* board reported CONN,GOTIP */
+    WhEventConnFail,    /* board reported CONN,FAIL */
+    WhEventWpsOk,       /* board reported WPS,OK (credentials captured) */
+    WhEventWpsFail,     /* board reported WPS,FAIL */
+    WhEventApSave,      /* save-prompt: store the credentials */
+    WhEventApDiscard,   /* save-prompt: don't store / skip */
+    WhEventElicitToggle, /* hunt screen: Down pressed to toggle the elicitation ping */
 } WhCustomEvent;
 
 /** A hunt target the user saved by name, persisted to the SD card. */
@@ -77,7 +97,36 @@ typedef struct {
     bool is_ap;
     bool randomized; /* locally administered MAC */
     bool pin_channel; /* user chose the channel: board must not hop away */
+    char ip[16];   /* IPv4 on the associated subnet (from IP,... lines), else empty */
+    char host[33]; /* best-effort hostname, else empty */
 } WhTarget;
+
+/** An IP/host learned before its device row existed (ARP replies can beat the
+ * client scan, and the post-login subnet sweep runs before the client list is
+ * open). Held until the matching row appears, then copied into it. */
+typedef struct {
+    char mac[18];
+    char ip[16];
+    char host[33];
+} WhPendingIp;
+
+/** A saved AP credential, persisted to the SD card (plaintext, like saved MACs). */
+typedef struct {
+    char ssid[WH_AP_SSID_MAX];
+    char security[5]; /* "Open"/"WEP"/"WPA"/"WPA2"/"WPA3", best-effort label */
+    char psk[WH_AP_PSK_MAX];
+} WhSavedAp;
+
+/** Board association state, updated from CONN,.../WPS,... lines (event-published:
+ * each field is written before the custom event that makes a scene read it). */
+typedef struct {
+    volatile bool connected;  /* holds a DHCP lease */
+    volatile bool connecting; /* a CONNECT / WPS is in flight */
+    char ssid[WH_AP_SSID_MAX];
+    char ip[16];
+    int fail_reason;     /* last CONN,FAIL code */
+    char fail_msg[32];   /* human-readable last failure (CONN,FAIL / ERR / timeout) */
+} WhConn;
 
 typedef struct {
     Gui* gui;
@@ -108,6 +157,11 @@ typedef struct {
      * of clearing them (re-sent MACs update in place, so rows stay matched to
      * their slot). A count, so back-to-back resumes can't lose one. */
     uint8_t results_keep_begins;
+
+    /* IPs that arrived before their row (guarded by results_mutex); applied when
+     * the row is created, cleared when the link drops. */
+    WhPendingIp pending_ips[WH_MAX_RESULTS];
+    size_t pending_ip_count;
 
     WhSearchKind search_kind;
 
@@ -142,10 +196,26 @@ typedef struct {
     size_t edit_index;        /* which saved[] entry is being edited */
     uint8_t edit_channel;     /* working channel while editing */
     bool edit_channel_mode;   /* Edit scene is showing its channel chooser */
+
+    /* AP login + association ("Clients of nearby AP" can log in first). */
+    int board_fw_version;      /* parsed from READY/PONG; 0 = unknown */
+    WhConn conn;
+    WhSavedAp saved_aps[WH_MAX_SAVED_AP];
+    size_t saved_ap_count;
+    char psk_buf[WH_AP_PSK_MAX]; /* TextInput buffer for an AP password */
+    bool login_pending_save;     /* a freshly entered / WPS psk awaits a save choice */
+    size_t ap_edit_index;        /* which saved_aps[] entry the Saved-APs menu manages */
+    bool ap_password_edit;       /* password editor just updates the stored psk, no connect */
 } WavehoundApp;
 
 /** Send a line to the board (no-op without a UART). */
 void wh_send(WavehoundApp* app, const char* line);
+
+/** Send CONNECT for app->clients_ap using app->psk_buf (SSID/PSK hex-encoded). */
+void wh_ap_connect(WavehoundApp* app);
+
+/** Continue from the AP-login flow to the client list (collapses to ChannelSelect). */
+void wh_ap_login_proceed(WavehoundApp* app);
 
 /** Parse "aa:bb:cc:dd:ee:ff" into bytes. Returns false on malformed input. */
 bool wh_parse_mac(const char* str, uint8_t mac[6]);

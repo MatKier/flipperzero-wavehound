@@ -6,6 +6,7 @@
  * strength; the Flipper turns it into a meter, a graph and Geiger clicks.
  */
 #include "wavehound_i.h"
+#include "wh_ap_store.h"
 #include "wh_store.h"
 
 #include <furi_hal.h>
@@ -37,6 +38,77 @@ bool wh_parse_mac(const char* str, uint8_t mac[6]) {
         mac[i] = (uint8_t)(hi << 4 | lo);
     }
     return true;
+}
+
+/* Hex-encode a C string (lowercase, NUL-terminated); matches the board's
+ * proto_hex_encode so free-text fields survive the comma-separated protocol. */
+static void wh_hex_encode(const char* src, char* out, size_t out_sz) {
+    static const char digits[] = "0123456789abcdef";
+    size_t n = 0;
+    for(const unsigned char* p = (const unsigned char*)src; *p && n + 2 < out_sz; p++) {
+        out[n++] = digits[*p >> 4];
+        out[n++] = digits[*p & 0x0f];
+    }
+    out[n] = '\0';
+}
+
+/* Decode an even-length hex string into out (NUL-terminated). Returns the byte
+ * count, or -1 on malformed/oversized input. */
+static int wh_hex_decode(const char* s, char* out, size_t out_sz) {
+    size_t n = 0;
+    while(s && s[0]) {
+        int hi = hex_nibble(s[0]);
+        int lo = hex_nibble(s[1]); /* s[1] may be the NUL terminator */
+        /* Terminate what we decoded so far before bailing: callers reuse a
+         * persistent buffer (e.g. psk_buf), so a half-decoded value must never
+         * be left unterminated. */
+        if(hi < 0 || lo < 0) {
+            out[n] = '\0';
+            return -1;
+        }
+        if(n + 1 >= out_sz) {
+            out[n] = '\0';
+            return -1;
+        }
+        out[n++] = (char)(hi << 4 | lo);
+        s += 2;
+    }
+    out[n] = '\0';
+    return (int)n;
+}
+
+void wh_ap_connect(WavehoundApp* app) {
+    char ssid_hex[2 * WH_AP_SSID_MAX];
+    char psk_hex[2 * WH_AP_PSK_MAX];
+    wh_hex_encode(app->clients_ap.name, ssid_hex, sizeof(ssid_hex));
+    wh_hex_encode(app->psk_buf, psk_hex, sizeof(psk_hex));
+
+    app->conn.connecting = true;
+    app->conn.connected = false;
+    app->conn.fail_reason = 0;
+    app->conn.fail_msg[0] = '\0';
+    strlcpy(app->conn.ssid, app->clients_ap.name, sizeof(app->conn.ssid));
+
+    /* CONNECT,<ssid_hex>,<psk_hex>,<bssid>,<ch> -- pass the AP's BSSID/channel so
+     * the join is quick and unambiguous. */
+    char cmd[2 * WH_AP_SSID_MAX + 2 * WH_AP_PSK_MAX + 40];
+    snprintf(
+        cmd,
+        sizeof(cmd),
+        "CONNECT,%s,%s,%s,%u",
+        ssid_hex,
+        psk_hex,
+        app->clients_ap.mac,
+        app->clients_ap.channel);
+    wh_send(app, cmd);
+}
+
+void wh_ap_login_proceed(WavehoundApp* app) {
+    /* Continue from the login flow to the client list: collapse back to
+     * ChannelSelect, which resumes with the pending pick and pushes the client
+     * TargetList (the same path a plain channel pick takes). */
+    app->channel_pick_pending = true;
+    scene_manager_search_and_switch_to_previous_scene(app->scene_manager, WhSceneChannelSelect);
 }
 
 /* ---------- board line parsing (UART worker thread) ---------- */
@@ -82,6 +154,15 @@ static WhTarget* wh_results_slot(WavehoundApp* app, const char* mac) {
     if(app->result_count >= WH_MAX_RESULTS) return NULL;
     WhTarget* t = &app->results[app->result_count++];
     memset(t, 0, sizeof(WhTarget));
+    /* Apply (and consume) an IP that arrived before this row existed. */
+    for(size_t i = 0; i < app->pending_ip_count; i++) {
+        if(strcmp(app->pending_ips[i].mac, mac) == 0) {
+            strlcpy(t->ip, app->pending_ips[i].ip, sizeof(t->ip));
+            strlcpy(t->host, app->pending_ips[i].host, sizeof(t->host));
+            app->pending_ips[i] = app->pending_ips[--app->pending_ip_count];
+            break;
+        }
+    }
     return t;
 }
 
@@ -140,6 +221,57 @@ static void wh_on_line(char* line, void* context) {
             strlcpy(t->phy, phy, sizeof(t->phy));
         }
         furi_mutex_release(app->results_mutex);
+    } else if(strcmp(tag, "IP") == 0) {
+        /* IP,<mac>,<ip>[,<host_hex>] -- annotate the matching client row and, if
+         * it's the target we're hunting, the hunt screen. */
+        const char* mac = next_field(&cur);
+        const char* ip = next_field(&cur);
+        if(!mac || !ip) return;
+        char host[33] = "";
+        const char* host_hex = next_field(&cur);
+        if(host_hex) wh_hex_decode(host_hex, host, sizeof(host));
+
+        furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+        bool matched = false;
+        for(size_t i = 0; i < app->result_count; i++) {
+            if(strcmp(app->results[i].mac, mac) == 0) {
+                strlcpy(app->results[i].ip, ip, sizeof(app->results[i].ip));
+                if(host[0]) strlcpy(app->results[i].host, host, sizeof(app->results[i].host));
+                matched = true;
+                break;
+            }
+        }
+        if(!matched) {
+            /* The row doesn't exist yet (sweep ran before the list opened, or the
+             * ARP reply beat the client scan): remember it, keyed by MAC, and
+             * wh_results_slot() applies it when the row appears. */
+            WhPendingIp* p = NULL;
+            for(size_t i = 0; i < app->pending_ip_count; i++) {
+                if(strcmp(app->pending_ips[i].mac, mac) == 0) {
+                    p = &app->pending_ips[i];
+                    break;
+                }
+            }
+            if(!p && app->pending_ip_count < WH_MAX_RESULTS) {
+                p = &app->pending_ips[app->pending_ip_count++];
+                p->host[0] = '\0';
+            }
+            if(p) {
+                strlcpy(p->mac, mac, sizeof(p->mac));
+                strlcpy(p->ip, ip, sizeof(p->ip));
+                if(host[0]) strlcpy(p->host, host, sizeof(p->host));
+            }
+        }
+        furi_mutex_release(app->results_mutex);
+
+        /* Only a station gets an IP on the hunt screen. An AP target's "IP"
+         * would be the gateway, which is misleading and would hide its SSID in
+         * the header (which has no AP-vs-station guard, unlike details.c). */
+        if(!app->target.is_ap && strcmp(mac, app->target.mac) == 0) {
+            strlcpy(app->target.ip, ip, sizeof(app->target.ip));
+            if(host[0]) strlcpy(app->target.host, host, sizeof(app->target.host));
+            wh_hunt_view_set_ip(app->hunt, app->target.ip, app->target.host);
+        }
     } else if(strcmp(tag, "INFO_BEGIN") == 0) {
         furi_mutex_acquire(app->results_mutex, FuriWaitForever);
         furi_string_set(app->board_info, "\e#Board info\n");
@@ -154,14 +286,77 @@ static void wh_on_line(char* line, void* context) {
         }
     } else if(strcmp(tag, "INFO_END") == 0) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WhEventBoardInfoReady);
+    } else if(strcmp(tag, "READY") == 0 || strcmp(tag, "PONG") == 0) {
+        /* Capture the board firmware version so the login UI can require it. */
+        const char* v = next_field(&cur);
+        if(v) app->board_fw_version = atoi(v);
+    } else if(strcmp(tag, "CONN") == 0) {
+        /* CONN,GOTIP,<ip>,<gw>,<dns> | CONN,FAIL,<reason> | CONN,DOWN | CONN,ASSOC,... */
+        const char* state = next_field(&cur);
+        if(!state) return;
+        if(strcmp(state, "GOTIP") == 0) {
+            const char* ip = next_field(&cur);
+            strlcpy(app->conn.ip, ip ? ip : "", sizeof(app->conn.ip));
+            app->conn.connecting = false;
+            app->conn.connected = true;
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnGotIp);
+        } else if(strcmp(state, "FAIL") == 0) {
+            app->conn.fail_reason = field_int(&cur);
+            snprintf(app->conn.fail_msg, sizeof(app->conn.fail_msg), "wifi %d", app->conn.fail_reason);
+            app->conn.connecting = false;
+            app->conn.connected = false;
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnFail);
+        } else if(strcmp(state, "DOWN") == 0) {
+            app->conn.connecting = false;
+            app->conn.connected = false;
+            app->conn.ip[0] = '\0';
+            /* The subnet is gone: any pending IPs are stale. */
+            furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+            app->pending_ip_count = 0;
+            furi_mutex_release(app->results_mutex);
+        }
+        /* ASSOC is layer-2 only: nothing to show until GOTIP. */
+    } else if(strcmp(tag, "WPS") == 0) {
+        /* WPS,OK,<ssid_hex>,<psk_hex> | WPS,FAIL,<reason> | WPS,ACTIVE */
+        const char* state = next_field(&cur);
+        if(!state) return;
+        if(strcmp(state, "OK") == 0) {
+            const char* ssid_hex = next_field(&cur);
+            const char* psk_hex = next_field(&cur);
+            char ssid[WH_AP_SSID_MAX] = "";
+            if(ssid_hex) wh_hex_decode(ssid_hex, ssid, sizeof(ssid));
+            if(ssid[0]) strlcpy(app->conn.ssid, ssid, sizeof(app->conn.ssid));
+            if(psk_hex) wh_hex_decode(psk_hex, app->psk_buf, sizeof(app->psk_buf));
+            app->login_pending_save = true; /* offer to save after the join succeeds */
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventWpsOk);
+        } else if(strcmp(state, "FAIL") == 0) {
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventWpsFail);
+        }
+        /* ACTIVE: the WPS scene already shows "press the button". */
+    } else if(strcmp(tag, "ERR") == 0) {
+        /* A command was rejected. While connecting, it's our CONNECT (e.g. a bad
+         * passphrase) -- surface it instead of waiting forever. */
+        if(app->conn.connecting) {
+            const char* reason = next_field(&cur);
+            strlcpy(app->conn.fail_msg, reason ? reason : "rejected", sizeof(app->conn.fail_msg));
+            app->conn.connecting = false;
+            app->conn.connected = false;
+            view_dispatcher_send_custom_event(app->view_dispatcher, WhEventConnFail);
+        }
     }
-    /* READY / PONG / OK / ERR only refresh the liveness timestamp. */
+    /* OK and other lines only refresh the liveness timestamp. */
 }
 
 /* Hunt view asks (Right key) to save the current target. */
 static void wh_hunt_save_cb(void* context) {
     WavehoundApp* app = context;
     view_dispatcher_send_custom_event(app->view_dispatcher, WhEventSaveTarget);
+}
+
+/* Hunt view asks (Down key) to toggle the elicitation ping. */
+static void wh_hunt_elicit_cb(void* context) {
+    WavehoundApp* app = context;
+    view_dispatcher_send_custom_event(app->view_dispatcher, WhEventElicitToggle);
 }
 
 /* ---------- dispatcher plumbing ---------- */
@@ -211,6 +406,7 @@ static WavehoundApp* wh_app_alloc(void) {
     view_dispatcher_add_view(app->view_dispatcher, WhViewWidget, widget_get_view(app->widget));
     app->hunt = wh_hunt_view_alloc();
     wh_hunt_view_set_save_callback(app->hunt, wh_hunt_save_cb, app);
+    wh_hunt_view_set_elicit_callback(app->hunt, wh_hunt_elicit_cb, app);
     view_dispatcher_add_view(app->view_dispatcher, WhViewHunt, wh_hunt_view_get_view(app->hunt));
     app->spectrum = wh_spectrum_view_alloc();
     view_dispatcher_add_view(
@@ -220,6 +416,7 @@ static WavehoundApp* wh_app_alloc(void) {
         app->view_dispatcher, WhViewVarItemList, variable_item_list_get_view(app->var_item_list));
 
     wh_store_load(app);
+    wh_ap_store_load(app);
     wh_settings_load(app);
     wh_settings_apply(app);
 
@@ -281,6 +478,10 @@ int32_t wavehound_app(void* p) {
     app->uart = wh_uart_alloc(wh_on_line, app);
     if(app->uart) {
         wh_send(app, "STOP");
+        /* Prompt a PONG,<version> so we learn the board firmware early -- the AP
+         * login UI is gated on it, and during a scan the keep-alive ping is
+         * otherwise suppressed. */
+        wh_send(app, "PING");
     } else {
         FURI_LOG_E(TAG, "USART busy");
     }
