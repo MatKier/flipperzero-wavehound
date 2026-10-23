@@ -493,14 +493,40 @@ static void merge_snapshot(void)
     xSemaphoreGive(s_lock);
 }
 
+/* Whether a chunk [lo, hi] has anything worth probing: any address that is not
+ * ours and, on a retry pass, not already in the table. Lets sweep_pass skip the
+ * reply wait + snapshot for chunks that would send no ARP at all (on a populated
+ * subnet the retry passes are then nearly instant). Mirrors the same skip test
+ * in tcpip_send_chunk, against the s_known_bits snapshot this pass was built on. */
+static bool chunk_has_unknown(uint32_t lo, uint32_t hi)
+{
+    if (!s_skip_known) {
+        return true; /* first pass: probe everything */
+    }
+    for (uint32_t h = lo; h <= hi; h++) {
+        const uint32_t addr_n = lwip_htonl(h);
+        if (addr_n == s_my_ip) {
+            continue;
+        }
+        if (!(s_known_bits[(h & 0xff) >> 3] & (1u << (h & 7)))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* One pass over [first_h, last_h]: send a small batch, let it answer, read the
  * cache before the next batch evicts it, announcing IPs as they are learned.
  * Names (slow, best-effort) are attempted once at the end. */
 static void sweep_pass(uint32_t first_h, uint32_t last_h)
 {
     for (uint32_t lo = first_h; lo <= last_h; lo += ND_SWEEP_CHUNK) {
+        const uint32_t hi = (lo + ND_SWEEP_CHUNK - 1 <= last_h) ? lo + ND_SWEEP_CHUNK - 1 : last_h;
+        if (!chunk_has_unknown(lo, hi)) {
+            continue; /* retry pass: every address here is already known */
+        }
         s_chunk_lo = lo;
-        s_chunk_hi = (lo + ND_SWEEP_CHUNK - 1 <= last_h) ? lo + ND_SWEEP_CHUNK - 1 : last_h;
+        s_chunk_hi = hi;
         tcpip_callback(tcpip_send_chunk, NULL);
         vTaskDelay(pdMS_TO_TICKS(ND_CHUNK_REPLY_MS));
         if (!s_connected) {
