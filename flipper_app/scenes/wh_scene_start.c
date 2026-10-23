@@ -5,6 +5,7 @@ typedef enum {
     StartItemSearchDevices,
     StartItemEnterMac,
     StartItemSaved,
+    StartItemSavedAps,
     StartItemSpectrum,
     StartItemBoardInfo,
     StartItemSettings,
@@ -55,6 +56,7 @@ void wh_scene_start_on_enter(void* context) {
         submenu, "Hunt devices", StartItemSearchDevices, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Enter MAC", StartItemEnterMac, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Saved MACs", StartItemSaved, wh_scene_start_callback, app);
+    submenu_add_item(submenu, "Saved APs", StartItemSavedAps, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Channel spectrum", StartItemSpectrum, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Board info", StartItemBoardInfo, wh_scene_start_callback, app);
     submenu_add_item(submenu, "Settings", StartItemSettings, wh_scene_start_callback, app);
@@ -101,6 +103,10 @@ bool wh_scene_start_on_event(void* context, SceneManagerEvent event) {
     case StartItemSaved:
         wh_scene_start_free_channel(app);
         scene_manager_next_scene(app->scene_manager, WhSceneSaved);
+        return true;
+    case StartItemSavedAps:
+        /* Pure credential management (no scan), so the link may stay up. */
+        scene_manager_next_scene(app->scene_manager, WhSceneSavedAps);
         return true;
     case StartItemSpectrum:
         wh_scene_start_free_channel(app);

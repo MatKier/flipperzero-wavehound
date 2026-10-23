@@ -186,6 +186,8 @@ typedef struct {
     size_t saved_ap_count;
     char psk_buf[WH_AP_PSK_MAX]; /* TextInput buffer for an AP password */
     bool login_pending_save;     /* a freshly entered / WPS psk awaits a save choice */
+    size_t ap_edit_index;        /* which saved_aps[] entry the Saved-APs menu manages */
+    bool ap_password_edit;       /* password editor just updates the stored psk, no connect */
 } WavehoundApp;
 
 /** Send a line to the board (no-op without a UART). */
