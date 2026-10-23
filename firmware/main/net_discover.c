@@ -400,7 +400,9 @@ static void emit_pending_ips(void)
         if (!found) {
             break;
         }
-        emit_ip(h.mac, h.ip, NULL);
+        /* Include the name if we already resolved it, so re-announcing (e.g. for
+         * a freshly reopened client list) doesn't downgrade a named row to IP. */
+        emit_ip(h.mac, h.ip, h.host[0] ? h.host : NULL);
     }
 }
 
@@ -662,9 +664,21 @@ void net_discover_on_down(void)
 
 void net_discover_rescan(void)
 {
-    if (s_connected && s_task) {
-        xTaskNotifyGive(s_task);
+    if (!s_connected || !s_task) {
+        return;
     }
+    /* The app clears its client list when a scan (re)starts, so re-announce every
+     * host we already know: mark them unemitted and the sweep re-sends each line
+     * (with its resolved name). Hosts still turn up again on the ARP re-probe,
+     * but this makes the rebuilt list carry the IPs/names immediately. */
+    if (s_lock) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        for (int i = 0; i < s_host_count; i++) {
+            s_hosts[i].emitted = false;
+        }
+        xSemaphoreGive(s_lock);
+    }
+    xTaskNotifyGive(s_task);
 }
 
 bool net_discover_lookup(const uint8_t mac[6], uint32_t *out_ip)
