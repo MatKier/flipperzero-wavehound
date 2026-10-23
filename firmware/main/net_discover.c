@@ -114,16 +114,30 @@ static void tcpip_send_chunk(void *ctx)
     }
 }
 
+/* ARP entries captured by the last tcpip_snapshot, handed from the tcpip thread
+ * to the discovery task. Written only on the tcpip thread; read by the task only
+ * after s_snapshot_done, so neither side needs s_lock. Keeping the shared host
+ * table off the tcpip thread means that high-priority lwip thread never blocks
+ * on s_lock (which the discovery task also holds). */
+static struct {
+    uint8_t mac[6];
+    uint32_t ip;
+} s_snap[ND_ARP_SLOTS];
+static int s_snap_count;
+
 static void tcpip_snapshot(void *ctx)
 {
     (void)ctx;
     ip4_addr_t *ipaddr;
     struct netif *nif;
     struct eth_addr *eth;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    /* Scan every slot (empty ones return 0): entries aren't packed, so don't
-     * stop at the first gap. */
-    for (size_t i = 0; i < ND_ARP_SLOTS; i++) {
+    int n = 0;
+    /* Read the ARP table here (lwip core is only safe on this thread), but copy
+     * the matches into s_snap rather than touching the shared host table under
+     * s_lock — the discovery task merges them once we signal done. Scan every
+     * slot (empty ones return 0): entries aren't packed, so don't stop at the
+     * first gap. */
+    for (size_t i = 0; i < ND_ARP_SLOTS && n < (int)ND_ARP_SLOTS; i++) {
         if (!etharp_get_entry(i, &ipaddr, &nif, &eth)) {
             continue;
         }
@@ -134,9 +148,11 @@ static void tcpip_snapshot(void *ctx)
         if ((ip_n & s_netmask) != (s_my_ip & s_netmask)) {
             continue; /* off our subnet (e.g. the gateway's own entries) */
         }
-        nd_add_locked(eth->addr, ip_n);
+        memcpy(s_snap[n].mac, eth->addr, 6);
+        s_snap[n].ip = ip_n;
+        n++;
     }
-    xSemaphoreGive(s_lock);
+    s_snap_count = n;
     xSemaphoreGive(s_snapshot_done);
 }
 
@@ -466,6 +482,17 @@ static void build_known_bitmap(uint32_t net24_h)
     xSemaphoreGive(s_lock);
 }
 
+/* Merge the entries captured by the last tcpip_snapshot into the host table.
+ * Runs on the discovery task after s_snapshot_done, so s_snap is stable. */
+static void merge_snapshot(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_snap_count; i++) {
+        nd_add_locked(s_snap[i].mac, s_snap[i].ip);
+    }
+    xSemaphoreGive(s_lock);
+}
+
 /* One pass over [first_h, last_h]: send a small batch, let it answer, read the
  * cache before the next batch evicts it, announcing IPs as they are learned.
  * Names (slow, best-effort) are attempted once at the end. */
@@ -481,7 +508,11 @@ static void sweep_pass(uint32_t first_h, uint32_t last_h)
         }
         xSemaphoreTake(s_snapshot_done, 0); /* drain any stale signal */
         tcpip_callback(tcpip_snapshot, NULL);
-        xSemaphoreTake(s_snapshot_done, pdMS_TO_TICKS(1000));
+        /* Merge only when the snapshot actually completed: on a timeout s_snap
+         * may still be mid-write on the tcpip thread. */
+        if (xSemaphoreTake(s_snapshot_done, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            merge_snapshot();
+        }
         emit_pending_ips();
     }
     resolve_pending_names();

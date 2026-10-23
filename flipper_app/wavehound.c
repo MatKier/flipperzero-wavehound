@@ -59,8 +59,17 @@ static int wh_hex_decode(const char* s, char* out, size_t out_sz) {
     while(s && s[0]) {
         int hi = hex_nibble(s[0]);
         int lo = hex_nibble(s[1]); /* s[1] may be the NUL terminator */
-        if(hi < 0 || lo < 0) return -1;
-        if(n + 1 >= out_sz) return -1;
+        /* Terminate what we decoded so far before bailing: callers reuse a
+         * persistent buffer (e.g. psk_buf), so a half-decoded value must never
+         * be left unterminated. */
+        if(hi < 0 || lo < 0) {
+            out[n] = '\0';
+            return -1;
+        }
+        if(n + 1 >= out_sz) {
+            out[n] = '\0';
+            return -1;
+        }
         out[n++] = (char)(hi << 4 | lo);
         s += 2;
     }
@@ -255,7 +264,10 @@ static void wh_on_line(char* line, void* context) {
         }
         furi_mutex_release(app->results_mutex);
 
-        if(strcmp(mac, app->target.mac) == 0) {
+        /* Only a station gets an IP on the hunt screen. An AP target's "IP"
+         * would be the gateway, which is misleading and would hide its SSID in
+         * the header (which has no AP-vs-station guard, unlike details.c). */
+        if(!app->target.is_ap && strcmp(mac, app->target.mac) == 0) {
             strlcpy(app->target.ip, ip, sizeof(app->target.ip));
             if(host[0]) strlcpy(app->target.host, host, sizeof(app->target.host));
             wh_hunt_view_set_ip(app->hunt, app->target.ip, app->target.host);
