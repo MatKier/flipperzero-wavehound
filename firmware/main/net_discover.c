@@ -595,18 +595,12 @@ static void elicit_task(void *arg)
         if (raw < 0) {
             raw = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP); /* best-effort; ARP alone still works */
         }
+        /* The command carries only the MAC, so resolve it to an IP from the
+         * sweep table (the app only lets elicitation start once that IP is
+         * known, so the lookup succeeds); cache it for the next ticks. */
         uint32_t ip = s_elicit_ip;
-        if (ip == 0) {
-            if (!net_discover_lookup(s_elicit_mac, &ip)) {
-                net_discover_rescan(); /* ask the sweep to find the target's IP */
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(600));
-                if (!net_discover_lookup(s_elicit_mac, &ip)) {
-                    ip = 0;
-                }
-            }
-            if (ip) {
-                s_elicit_ip = ip;
-            }
+        if (ip == 0 && net_discover_lookup(s_elicit_mac, &ip)) {
+            s_elicit_ip = ip;
         }
         if (ip) {
             /* TODO (see TODO.md): this sends BOTH an ARP request and an ICMP echo
