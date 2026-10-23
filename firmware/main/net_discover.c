@@ -26,12 +26,15 @@
 #define ND_ARP_SLOTS 32              /* ARP-cache slots to scan (>= ARP_TABLE_SIZE) */
 #define ND_RESOLVE_TIMEOUT_MS 400    /* per reverse-DNS / NBNS attempt */
 #define ND_HOST_MAX 33               /* hostname buffer incl. NUL */
+#define ND_SWEEP_PASSES 3            /* probe the subnet this many times per trigger */
+#define ND_PASS_GAP_MS 1500          /* pause between passes so a sleeping host can wake */
+#define ND_NAME_MAX_TRIES 3          /* reverse-DNS/NBNS attempts per host before giving up */
 
 typedef struct {
     uint8_t mac[6];
-    uint32_t ip;   /* network byte order */
-    bool emitted;  /* IP line sent */
-    bool resolved; /* hostname attempt done (success or not) */
+    uint32_t ip;         /* network byte order */
+    bool emitted;        /* IP line sent */
+    uint8_t name_tries;  /* reverse-DNS/NBNS attempts so far (capped at ND_NAME_MAX_TRIES) */
     char host[ND_HOST_MAX];
 } nd_host_t;
 
@@ -48,6 +51,12 @@ static volatile bool s_connected;
 /* Host-order address range handed to the tcpip-thread send callback. Only the
  * discovery task writes these, and only while a chunk callback is not queued. */
 static uint32_t s_chunk_lo, s_chunk_hi;
+
+/* On a retry pass, skip the addresses we already have. s_known_bits is a 256-bit
+ * map of the swept /24 (keyed by the last octet), rebuilt by the discovery task
+ * before each retry pass and read lock-free by the send callback. */
+static uint8_t s_known_bits[32];
+static volatile bool s_skip_known;
 
 /* Elicitation: a dedicated task pokes one target every interval so it emits
  * reply frames the hunt can sample. */
@@ -67,7 +76,8 @@ static void nd_add_locked(const uint8_t mac[6], uint32_t ip)
             if (s_hosts[i].ip != ip) {
                 s_hosts[i].ip = ip; /* address changed: re-announce and re-resolve */
                 s_hosts[i].emitted = false;
-                s_hosts[i].resolved = false;
+                s_hosts[i].name_tries = 0;
+                s_hosts[i].host[0] = '\0';
             }
             return;
         }
@@ -94,6 +104,9 @@ static void tcpip_send_chunk(void *ctx)
         const uint32_t addr_n = lwip_htonl(h);
         if (addr_n == s_my_ip) {
             continue;
+        }
+        if (s_skip_known && (s_known_bits[(h & 0xff) >> 3] & (1u << (h & 7)))) {
+            continue; /* a retry pass: this address is already in the table */
         }
         ip4_addr_t ip;
         ip4_addr_set_u32(&ip, addr_n);
@@ -392,18 +405,23 @@ static void emit_pending_ips(void)
 }
 
 /* Best-effort hostnames (slow sockets), re-emitting the line with the name.
- * `resolved` is set up front so a non-answering host isn't retried every sweep. */
+ * Called once per sweep pass: each still-unnamed host gets one more attempt, up
+ * to ND_NAME_MAX_TRIES across passes, so a transient DNS/NBNS miss is retried
+ * (but a host that simply has no PTR/NBNS name isn't hammered forever). The
+ * index advances monotonically so no host is tried twice in one pass. */
 static void resolve_pending_names(void)
 {
+    int i = 0;
     for (;;) {
         nd_host_t h;
         bool found = false;
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        for (int i = 0; i < s_host_count; i++) {
-            if (s_hosts[i].emitted && !s_hosts[i].resolved) {
-                s_hosts[i].resolved = true;
+        for (; i < s_host_count; i++) {
+            if (s_hosts[i].host[0] == '\0' && s_hosts[i].name_tries < ND_NAME_MAX_TRIES) {
+                s_hosts[i].name_tries++;
                 h = s_hosts[i];
                 found = true;
+                i++; /* don't re-pick this host this pass */
                 break;
             }
         }
@@ -429,6 +447,44 @@ static void resolve_pending_names(void)
     }
 }
 
+/* Fill s_known_bits with the last octet of every host we already have on the
+ * swept /24, so a retry pass can skip them. net24_h is the /24 base, host order. */
+static void build_known_bitmap(uint32_t net24_h)
+{
+    memset(s_known_bits, 0, sizeof(s_known_bits));
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_host_count; i++) {
+        const uint32_t h = lwip_ntohl(s_hosts[i].ip);
+        if ((h & 0xffffff00u) != net24_h) {
+            continue; /* a stored host off the range we are sweeping */
+        }
+        const uint8_t oct = h & 0xff;
+        s_known_bits[oct >> 3] |= (uint8_t)(1u << (oct & 7));
+    }
+    xSemaphoreGive(s_lock);
+}
+
+/* One pass over [first_h, last_h]: send a small batch, let it answer, read the
+ * cache before the next batch evicts it, announcing IPs as they are learned.
+ * Names (slow, best-effort) are attempted once at the end. */
+static void sweep_pass(uint32_t first_h, uint32_t last_h)
+{
+    for (uint32_t lo = first_h; lo <= last_h; lo += ND_SWEEP_CHUNK) {
+        s_chunk_lo = lo;
+        s_chunk_hi = (lo + ND_SWEEP_CHUNK - 1 <= last_h) ? lo + ND_SWEEP_CHUNK - 1 : last_h;
+        tcpip_callback(tcpip_send_chunk, NULL);
+        vTaskDelay(pdMS_TO_TICKS(ND_CHUNK_REPLY_MS));
+        if (!s_connected) {
+            return;
+        }
+        xSemaphoreTake(s_snapshot_done, 0); /* drain any stale signal */
+        tcpip_callback(tcpip_snapshot, NULL);
+        xSemaphoreTake(s_snapshot_done, pdMS_TO_TICKS(1000));
+        emit_pending_ips();
+    }
+    resolve_pending_names();
+}
+
 static void sweep_once(void)
 {
     const uint32_t my = s_my_ip, mask = s_netmask;
@@ -444,25 +500,26 @@ static void sweep_once(void)
         first_h = (my_h & 0xffffff00u) + 1;
         last_h = (my_h & 0xffffff00u) + 254;
     }
+    const uint32_t net24_h = first_h & 0xffffff00u; /* the range lies within one /24 */
 
-    /* Send a small batch, let it answer, then read the cache before the next
-     * batch evicts it; announce IPs as they are learned. */
-    for (uint32_t lo = first_h; lo <= last_h; lo += ND_SWEEP_CHUNK) {
-        s_chunk_lo = lo;
-        s_chunk_hi = (lo + ND_SWEEP_CHUNK - 1 <= last_h) ? lo + ND_SWEEP_CHUNK - 1 : last_h;
-        tcpip_callback(tcpip_send_chunk, NULL);
-        vTaskDelay(pdMS_TO_TICKS(ND_CHUNK_REPLY_MS));
-        if (!s_connected) {
-            return;
+    /* Probe a few times: a device in power-save often misses its one ARP in a
+     * pass, so re-probe after a gap. The first pass covers everything; later
+     * passes skip the hosts already found and re-probe only what is still
+     * missing (and give still-unnamed hosts another resolve attempt). */
+    for (int pass = 0; pass < ND_SWEEP_PASSES && s_connected; pass++) {
+        if (pass > 0) {
+            vTaskDelay(pdMS_TO_TICKS(ND_PASS_GAP_MS));
+            if (!s_connected) {
+                break;
+            }
+            build_known_bitmap(net24_h);
+            s_skip_known = true;
+        } else {
+            s_skip_known = false;
         }
-        xSemaphoreTake(s_snapshot_done, 0); /* drain any stale signal */
-        tcpip_callback(tcpip_snapshot, NULL);
-        xSemaphoreTake(s_snapshot_done, pdMS_TO_TICKS(1000));
-        emit_pending_ips();
+        sweep_pass(first_h, last_h);
     }
-
-    /* Names are slow and best-effort, so do them after the whole sweep. */
-    resolve_pending_names();
+    s_skip_known = false;
 }
 
 static void netscan_task(void *arg)

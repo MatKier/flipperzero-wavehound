@@ -9,7 +9,9 @@
   answers and you get a steady signal to measure. It is capped and aimed at one
   MAC — not a flood.
 - The client list and hunt screen now show each device's **IP** and, when it can
-  be resolved, a **hostname**.
+  be resolved, a **hostname**. Discovery now probes the network a few times so
+  devices that were briefly asleep still turn up, and retries name lookups that
+  first came back empty.
 - New **Saved APs** menu to edit or delete saved access-point passwords.
 - New **Ping interval** setting (50 ms–1 s, default 250 ms) for the elicitation
   ping.

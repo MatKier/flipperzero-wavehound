@@ -128,8 +128,13 @@ AP's DNS server), falling back to NBNS (a NetBIOS node-status query to the host)
 consumer networks return no name; the IP is always provided. The app keys on
 `<mac>` to show IPs/names against the clients it already lists and the target it
 hunts. A fresh sweep runs when a client scan starts, so the list stays current.
-Reverse DNS/NBNS and the ARP table are all handled on the board; the Flipper
-only consumes the `IP` lines.
+
+Each trigger probes the subnet a few times with a short gap, not once: a device
+in power-save often misses its single ARP, so later passes re-probe only the
+addresses still missing (the ones already found are skipped) and give each
+still-unnamed host another reverse-DNS/NBNS attempt (bounded, so a host with no
+name isn't retried forever). Reverse DNS/NBNS and the ARP table are all handled
+on the board; the Flipper only consumes the `IP` lines.
 
 ### Elicitation
 
