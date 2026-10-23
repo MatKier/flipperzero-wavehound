@@ -19,7 +19,10 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  # Feature branches auto-cancel a stale in-progress build (newest push wins).
+  # The default branch and tags never cancel: same-ref runs serialize instead,
+  # so a release's back-to-back main pushes (merge + commit_sha) both finish.
+  cancel-in-progress: ${{ github.ref_type != 'tag' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
 env:
   FLIPPER_SDK: "1.5.1"   # firmware SDK the app is built against (API 88.2)
