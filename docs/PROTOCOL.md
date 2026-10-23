@@ -146,8 +146,13 @@ host answers, even when it drops ICMP — plus an ICMP echo as a complement. Eac
 reply is a frame transmitted by the target, so the running hunt (parked on the
 AP's channel) samples it like any other. It is a low-rate, single-target probe
 for direction finding, not a flood: one ARP + one echo per interval. The target
-IP comes from the [host-discovery](#host-discovery) table (a rescan is triggered
-if the MAC isn't mapped yet). `ELICIT,STOP`, `STOP`, `SLEEP` and losing the link
-all stop it. The board emits `ELICIT,ON,<ms>` / `ELICIT,OFF` as it starts/stops.
+IP comes from the [host-discovery](#host-discovery) table. The caller starts
+elicitation only once that IP is known — the app gates its control on it, and the
+hunt screen keeps sending [`RESOLVE`](#flipper---board) until the IP fills in — so
+the board resolves the MAC from the sweep table it already holds. If the MAC
+isn't mapped the board sends nothing that interval (it does not itself trigger a
+sweep); `ELICIT,ON` is still reported. `ELICIT,STOP`, `STOP`, `SLEEP` and losing
+the link all stop it. The board emits `ELICIT,ON,<ms>` / `ELICIT,OFF` as it
+starts/stops.
 
 SSIDs are sanitized: control characters become `?`, so every message stays on one line.

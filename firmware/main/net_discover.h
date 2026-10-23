@@ -40,8 +40,10 @@ bool net_discover_lookup(const uint8_t mac[6], uint32_t *out_ip);
 /**
  * Start eliciting reply frames from `mac` so a hunt can sample it: poke it every
  * `interval_ms` (clamped to 50-1000) with a unicast ARP request (primary) and an
- * ICMP echo (complement). The target's IP is resolved from the sweep table (a
- * rescan is kicked if unknown). Emits `ELICIT,ON,<ms>`.
+ * ICMP echo (complement). The target's IP is read from the sweep table; the
+ * caller is expected to have discovered it first (the app only enables
+ * elicitation once the IP is known). If the MAC isn't mapped, nothing is sent --
+ * this does not itself trigger a sweep. Emits `ELICIT,ON,<ms>`.
  */
 void net_discover_elicit_start(const uint8_t mac[6], uint32_t interval_ms);
 
