@@ -44,9 +44,19 @@ static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_snapshot_done;
 static TaskHandle_t s_task;
 
-static struct netif *s_netif; /* lwip netif backing the STA */
+static struct netif * volatile s_netif; /* lwip netif backing the STA (volatile pointer) */
 static volatile uint32_t s_my_ip, s_netmask, s_dns; /* network byte order */
 static volatile bool s_connected;
+
+/* net_discover_on_gotip (event task) publishes the subnet config above as a set;
+ * a sweep captures it as a coherent copy below. s_cfg_mux makes the publish and
+ * the capture mutually exclusive so a DHCP renew mid-capture can't tear across
+ * fields. The sweep then reads only s_sweep_*, so the whole sweep -- its range,
+ * the per-chunk filters and the tcpip-thread callbacks -- agrees on one subnet.
+ * (The elicit path keeps reading the live s_netif; it is independent of a sweep.) */
+static portMUX_TYPE s_cfg_mux = portMUX_INITIALIZER_UNLOCKED;
+static struct netif *s_sweep_netif;
+static volatile uint32_t s_sweep_myip, s_sweep_mask, s_sweep_dns;
 
 /* Host-order address range handed to the tcpip-thread send callback. Only the
  * discovery task writes these, and only while a chunk callback is not queued. */
@@ -96,13 +106,13 @@ static void nd_add_locked(const uint8_t mac[6], uint32_t ip)
 static void tcpip_send_chunk(void *ctx)
 {
     (void)ctx;
-    struct netif *nif = s_netif;
+    struct netif *nif = s_sweep_netif;
     if (!nif) {
         return;
     }
     for (uint32_t h = s_chunk_lo; h <= s_chunk_hi; h++) {
         const uint32_t addr_n = lwip_htonl(h);
-        if (addr_n == s_my_ip) {
+        if (addr_n == s_sweep_myip) {
             continue;
         }
         if (s_skip_known && (s_known_bits[(h & 0xff) >> 3] & (1u << (h & 7)))) {
@@ -141,11 +151,11 @@ static void tcpip_snapshot(void *ctx)
         if (!etharp_get_entry(i, &ipaddr, &nif, &eth)) {
             continue;
         }
-        if (nif != s_netif) {
+        if (nif != s_sweep_netif) {
             continue;
         }
         const uint32_t ip_n = ip4_addr_get_u32(ipaddr);
-        if ((ip_n & s_netmask) != (s_my_ip & s_netmask)) {
+        if ((ip_n & s_sweep_mask) != (s_sweep_myip & s_sweep_mask)) {
             continue; /* off our subnet (e.g. the gateway's own entries) */
         }
         memcpy(s_snap[n].mac, eth->addr, 6);
@@ -448,7 +458,7 @@ static void resolve_pending_names(void)
             break;
         }
         char name[ND_HOST_MAX] = "";
-        if (!reverse_dns(h.ip, s_dns, name, sizeof(name))) {
+        if (!reverse_dns(h.ip, s_sweep_dns, name, sizeof(name))) {
             nbns_name(h.ip, name, sizeof(name));
         }
         if (name[0]) {
@@ -505,7 +515,7 @@ static bool chunk_has_unknown(uint32_t lo, uint32_t hi)
     }
     for (uint32_t h = lo; h <= hi; h++) {
         const uint32_t addr_n = lwip_htonl(h);
-        if (addr_n == s_my_ip) {
+        if (addr_n == s_sweep_myip) {
             continue;
         }
         if (!(s_known_bits[(h & 0xff) >> 3] & (1u << (h & 7)))) {
@@ -546,10 +556,21 @@ static void sweep_pass(uint32_t first_h, uint32_t last_h)
 
 static void sweep_once(void)
 {
-    const uint32_t my = s_my_ip, mask = s_netmask;
-    if (!s_netif || mask == 0) {
+    /* Capture the subnet config once, as a coherent set, under s_cfg_mux (pairs
+     * with the publish in net_discover_on_gotip). Everything this sweep does --
+     * the range below, the per-chunk filters, the tcpip callbacks -- then reads
+     * the s_sweep_* copy, so a lease change mid-sweep can't mix old/new fields. */
+    portENTER_CRITICAL(&s_cfg_mux);
+    struct netif *nif = s_netif;
+    const uint32_t my = s_my_ip, mask = s_netmask, dns = s_dns;
+    portEXIT_CRITICAL(&s_cfg_mux);
+    if (!nif || mask == 0) {
         return;
     }
+    s_sweep_netif = nif;
+    s_sweep_myip = my;
+    s_sweep_mask = mask;
+    s_sweep_dns = dns;
     const uint32_t net_n = my & mask;
     uint32_t first_h = lwip_ntohl(net_n) + 1;
     uint32_t last_h = lwip_ntohl(net_n | ~mask);
@@ -597,13 +618,14 @@ static void netscan_task(void *arg)
 static void tcpip_send_arp_one(void *ctx)
 {
     (void)ctx;
+    struct netif *nif = s_netif;
     const uint32_t tgt = s_arp_target;
-    if (!s_netif || tgt == 0) {
+    if (!nif || tgt == 0) {
         return;
     }
     ip4_addr_t ip;
     ip4_addr_set_u32(&ip, tgt);
-    etharp_request(s_netif, &ip); /* the target answers -> the hunt sniffs the reply */
+    etharp_request(nif, &ip); /* the target answers -> the hunt sniffs the reply */
 }
 
 static void icmp_echo(int sock, uint32_t ip_net)
@@ -703,11 +725,17 @@ void net_discover_init(void)
 
 void net_discover_on_gotip(esp_netif_t *netif, uint32_t ip, uint32_t mask, uint32_t dns)
 {
-    s_netif = (struct netif *)esp_netif_get_netif_impl(netif);
+    /* Publish the config as a set under s_cfg_mux so a sweep's capture can't read
+     * a half-updated subnet. Resolve the netif impl before the lock to keep the
+     * critical section to four stores. */
+    struct netif *nif = (struct netif *)esp_netif_get_netif_impl(netif);
+    portENTER_CRITICAL(&s_cfg_mux);
+    s_netif = nif;
     s_my_ip = ip;
     s_netmask = mask;
     s_dns = dns;
-    s_connected = true;
+    portEXIT_CRITICAL(&s_cfg_mux);
+    s_connected = true; /* set last: a reader seeing connected then sees full config */
     if (s_task) {
         xTaskNotifyGive(s_task);
     }
