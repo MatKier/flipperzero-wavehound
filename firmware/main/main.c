@@ -287,6 +287,11 @@ static void handle_line(char *line)
         handle_wps(args);
     } else if (strcmp(line, "ELICIT") == 0) {
         handle_elicit(args);
+    } else if (strcmp(line, "RESOLVE") == 0) {
+        /* Re-run host discovery; any resolved IP/host streams back as IP lines.
+         * An optional MAC arg (RESOLVE,<mac>) is ignored -- the sweep is
+         * subnet-wide -- but accepted for forward compatibility. */
+        radio_resolve();
     } else if (strcmp(line, "INFO") == 0) {
         info_report();
     } else if (strcmp(line, "STOP") == 0) {

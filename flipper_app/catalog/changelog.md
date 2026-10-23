@@ -10,8 +10,9 @@
   MAC — not a flood.
 - The client list and hunt screen now show each device's **IP** and, when it can
   be resolved, a **hostname**. Discovery now probes the network a few times so
-  devices that were briefly asleep still turn up, and retries name lookups that
-  first came back empty.
+  devices that were briefly asleep still turn up, retries name lookups that
+  first came back empty, and keeps trying to resolve a hunt target's IP while
+  you hunt it, so elicitation becomes available once it answers.
 - New **Saved APs** menu to edit or delete saved access-point passwords.
 - New **Ping interval** setting (50 ms–1 s, default 250 ms) for the elicitation
   ping.

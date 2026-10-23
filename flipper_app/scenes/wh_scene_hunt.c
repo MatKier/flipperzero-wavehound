@@ -5,9 +5,23 @@
 /* Whether the elicitation ping is currently running (reset on each hunt). */
 static bool s_elicit_on;
 
+/* Ticks since the last RESOLVE nudge (reset on each hunt). */
+static uint32_t s_resolve_ticks;
+#define WH_HUNT_RESOLVE_PERIOD_TICKS (3000 / WH_TICK_MS) /* re-ask about every 3 s */
+
 /* Elicitation is offered only when associated and the target's IP is known. */
 static bool wh_scene_hunt_elicit_avail(WavehoundApp* app) {
     return app->conn.connected && app->target.ip[0] != '\0';
+}
+
+/* While hunting a connected target whose IP we don't have yet, nudge the board
+ * to re-run host discovery so the IP (and name) can fill in and elicitation
+ * becomes available. A no-op once resolved, or on boards without RESOLVE. */
+static void wh_scene_hunt_maybe_resolve(WavehoundApp* app) {
+    if(app->conn.connected && app->target.ip[0] == '\0' &&
+       app->board_fw_version >= WH_FW_RESOLVE_MIN) {
+        wh_send(app, "RESOLVE");
+    }
 }
 
 void wh_scene_hunt_on_enter(void* context) {
@@ -19,6 +33,8 @@ void wh_scene_hunt_on_enter(void* context) {
     s_elicit_on = false;
     wh_hunt_view_set_elicit_on(app->hunt, false);
     wh_hunt_view_set_elicit_available(app->hunt, wh_scene_hunt_elicit_avail(app));
+    s_resolve_ticks = 0;
+    wh_scene_hunt_maybe_resolve(app); /* kick a lookup right away if IP unknown */
 
     if(app->settings.keep_backlight) {
         notification_message(app->notifications, &sequence_display_backlight_enforce_on);
@@ -52,6 +68,11 @@ bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
         if(!avail && s_elicit_on) {
             s_elicit_on = false;
             wh_hunt_view_set_elicit_on(app->hunt, false);
+        }
+        /* Keep nudging the board to resolve the target's IP until it is known. */
+        if(++s_resolve_ticks >= WH_HUNT_RESOLVE_PERIOD_TICKS) {
+            s_resolve_ticks = 0;
+            wh_scene_hunt_maybe_resolve(app);
         }
         return false;
     }

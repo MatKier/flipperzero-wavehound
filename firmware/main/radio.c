@@ -1003,6 +1003,15 @@ void radio_elicit_stop(void)
     net_discover_elicit_stop();
 }
 
+bool radio_resolve(void)
+{
+    if (!s_got_ip) {
+        return false; /* no subnet to sweep */
+    }
+    net_discover_rescan(); /* re-run host discovery and re-announce what we know */
+    return true;
+}
+
 void radio_conn_summary(char *ssid, size_t ssid_sz, char *ip, size_t ip_sz)
 {
     if (ssid && ssid_sz) {

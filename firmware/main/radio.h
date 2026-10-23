@@ -73,6 +73,11 @@ bool radio_elicit_start(const uint8_t mac[6], uint16_t interval_ms);
 /** Stop elicitation (emits `ELICIT,OFF` if it was running). */
 void radio_elicit_stop(void);
 
+/** Re-run host discovery now (ARP sweep + re-announce) if associated. Used to
+ * resolve a hunt target's IP/host that wasn't known yet. Returns false with no
+ * lease. */
+bool radio_resolve(void);
+
 /**
  * Fill short association / IPv4 strings for the INFO block. Each is set to "-"
  * when not associated or without a lease yet. `ssid` should hold >= 33 bytes and

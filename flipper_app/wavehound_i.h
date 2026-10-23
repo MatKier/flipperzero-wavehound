@@ -31,6 +31,10 @@
  * the login UI is hidden for older boards (which answer those commands ERR). */
 #define WH_FW_LOGIN_MIN 9
 
+/* The board firmware version at which the RESOLVE command appeared; the hunt
+ * screen only asks older boards to re-resolve if they understand it. */
+#define WH_FW_RESOLVE_MIN 15
+
 typedef enum {
     WhViewSubmenu,
     WhViewByteInput,
