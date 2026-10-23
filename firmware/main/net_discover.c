@@ -64,7 +64,7 @@ static TaskHandle_t s_elicit_task;
 static volatile bool s_elicit_active;
 static volatile uint32_t s_elicit_interval_ms;
 static volatile uint32_t s_elicit_ip; /* resolved target IP (network order), 0 = unknown */
-static uint8_t s_elicit_mac[6];
+static uint8_t s_elicit_mac[6]; /* guarded by s_lock: a retarget rewrites all 6 bytes */
 static volatile uint32_t s_arp_target; /* IP handed to the tcpip-thread ARP sender */
 
 /* --- shared host table (hold s_lock) --- */
@@ -626,12 +626,26 @@ static void elicit_task(void *arg)
         if (raw < 0) {
             raw = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP); /* best-effort; ARP alone still works */
         }
+        /* Snapshot the target under s_lock: a retarget (net_discover_elicit_start)
+         * rewrites all 6 MAC bytes, so reading the array unguarded could tear it
+         * mid-write. Take a coherent (mac, ip) pair, then look it up unlocked
+         * (net_discover_lookup takes s_lock itself, which isn't recursive). */
+        uint8_t mac[6];
+        uint32_t ip;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        memcpy(mac, s_elicit_mac, 6);
+        ip = s_elicit_ip;
+        xSemaphoreGive(s_lock);
         /* The command carries only the MAC, so resolve it to an IP from the
          * sweep table (the app only lets elicitation start once that IP is
-         * known, so the lookup succeeds); cache it for the next ticks. */
-        uint32_t ip = s_elicit_ip;
-        if (ip == 0 && net_discover_lookup(s_elicit_mac, &ip)) {
-            s_elicit_ip = ip;
+         * known, so the lookup succeeds); cache it for the next ticks, unless a
+         * retarget swapped the target while we looked this one up. */
+        if (ip == 0 && net_discover_lookup(mac, &ip) && ip) {
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            if (memcmp(mac, s_elicit_mac, 6) == 0) {
+                s_elicit_ip = ip;
+            }
+            xSemaphoreGive(s_lock);
         }
         if (ip) {
             /* TODO (see TODO.md): this sends BOTH an ARP request and an ICMP echo
@@ -731,8 +745,12 @@ void net_discover_elicit_start(const uint8_t mac[6], uint32_t interval_ms)
     } else if (interval_ms > 1000) {
         interval_ms = 1000;
     }
+    /* Update the MAC (and clear the cached IP) under s_lock so the elicit task
+     * can't read a half-rewritten MAC. */
+    xSemaphoreTake(s_lock, portMAX_DELAY);
     memcpy(s_elicit_mac, mac, 6);
     s_elicit_ip = 0; /* the task resolves it (from the sweep table) */
+    xSemaphoreGive(s_lock);
     s_elicit_interval_ms = interval_ms;
     s_elicit_active = true;
     if (s_elicit_task) {
