@@ -29,6 +29,22 @@ static void wh_scene_start_callback(void* context, uint32_t index) {
     view_dispatcher_send_custom_event(app->view_dispatcher, index);
 }
 
+/* A fresh search needs channel freedom, but the board pins itself to the AP's
+ * channel while associated (set_channel is a no-op then), so a scan started
+ * after login would only ever see the AP's channel. Drop the link here so
+ * hopping/parking works again; the "Clients of nearby AP" login flow
+ * re-associates on demand. Not called for Board info (which wants the link kept
+ * so Assoc/IP still show) or the non-search items. Harmless when not connected. */
+static void wh_scene_start_free_channel(WavehoundApp* app) {
+    if(app->conn.connected || app->conn.connecting) {
+        wh_send(app, "DISCONNECT");
+        /* Reflect it locally at once; the board's CONN,DOWN confirms it and also
+         * clears conn.ip (see the CONN handler in wavehound.c). */
+        app->conn.connecting = false;
+        app->conn.connected = false;
+    }
+}
+
 void wh_scene_start_on_enter(void* context) {
     WavehoundApp* app = context;
     s_relit = false;
@@ -67,22 +83,27 @@ bool wh_scene_start_on_event(void* context, SceneManagerEvent event) {
     scene_manager_set_scene_state(app->scene_manager, WhSceneStart, event.event);
     switch(event.event) {
     case StartItemHuntAp:
+        wh_scene_start_free_channel(app);
         app->search_kind = WhSearchAccessPoints;
         app->picking_ap_channel = false;
         scene_manager_next_scene(app->scene_manager, WhSceneTargetList);
         return true;
     case StartItemSearchDevices:
+        wh_scene_start_free_channel(app);
         app->channel_purpose = WhChannelForDeviceSearch;
         scene_manager_next_scene(app->scene_manager, WhSceneChannelSelect);
         return true;
     case StartItemEnterMac:
+        wh_scene_start_free_channel(app);
         app->editing = false; /* fresh manual entry, not editing a saved entry */
         scene_manager_next_scene(app->scene_manager, WhSceneMacInput);
         return true;
     case StartItemSaved:
+        wh_scene_start_free_channel(app);
         scene_manager_next_scene(app->scene_manager, WhSceneSaved);
         return true;
     case StartItemSpectrum:
+        wh_scene_start_free_channel(app);
         scene_manager_next_scene(app->scene_manager, WhSceneSpectrum);
         return true;
     case StartItemBoardInfo:
