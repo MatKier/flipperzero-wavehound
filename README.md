@@ -200,112 +200,37 @@ the running version.
 
 ## Vendor database
 
-The details screen resolves a MAC's vendor from its OUI (the first 3 bytes)
-using `oui.db`, a sorted fixed-width binary file (a small header, then 16-byte
-records: 3-byte OUI + name) that the app binary-searches on the SD card, so it
-never loads into RAM.
+The vendor on the details screen comes from `oui.db`, a lookup table built from
+Wireshark's `manuf` and bundled with the app. To use newer data without
+rebuilding, drop your own `oui.db` into `/ext/apps_data/wavehound/`; it takes
+precedence over the bundled copy. Format, refresh and licensing are in
+[docs/VENDOR_DB.md](docs/VENDOR_DB.md).
 
 <p align="center">
   <img src="flipper_app/catalog/screenshots/device_detail.png" alt="Wavehound device details screen showing the resolved vendor" width="400">
 </p>
 
-`flipper_app/assets/oui.db` is committed together with the Wireshark `manuf` it
-is built from (`tools/manuf.gz`), so every build bundles it, including the
-Flipper Apps Catalog build. The app looks for it in two places, in order:
-
-1. `/ext/apps_data/wavehound/oui.db`: your own drop-in, e.g. newer data
-   (`python3 tools/gen_oui.py --download -o oui.db` makes one; older header-less
-   files with 32-byte records still work).
-2. `/ext/apps_assets/wavehound/oui.db`: the bundled copy, unpacked when the app
-   is installed.
-
-Without a database, non-randomized MACs show "Unknown". To refresh the bundled
-copy, run `python3 build_app.py --update-db` and commit `tools/manuf.gz` and
-`oui.db` together; CI fails if they don't match byte for byte. Both are
-GPL-2.0-or-later, see [License](#license).
-
 ## Install
 
-### Prebuilt releases
-
 Each [GitHub release](https://github.com/MatKier/flipperzero-wavehound/releases)
-ships `wavehound.fap` (vendor database bundled) and the board firmware:
-`wavehound-esp32s2-fw<N>-full.bin` to flash at `0x0`, plus the separate
-bootloader / partition table / app images. `FLASHING.txt` in the release has
-the esptool commands. Copy the `.fap` as in step 2 below.
+ships `wavehound.fap` (vendor database bundled) and the board firmware.
 
-### 1. Flash the dev board firmware
+1. **Flash the dev board.** Put it in
+   [download mode](docs/BUILDING.md#download-mode) and flash
+   `wavehound-esp32s2-fw<N>-full.bin` at `0x0` (the separate bootloader /
+   partition table / app images are included too). `FLASHING.txt` in the
+   release has the esptool commands. Tap **RESET** afterwards.
+2. **Install the app.** Copy `wavehound.fap` to `SD:/apps/GPIO/` with qFlipper,
+   the same folder a Flipper Apps Catalog install uses. It shows up under
+   **Apps → GPIO → Wavehound**.
+3. **Use it.** Plug the dev board onto the Flipper and open Wavehound. The app
+   turns on 5 V on the GPIO header and takes over the USART from the expansion
+   service; the menu header changes to **"Wavehound - board OK"** once the board
+   answers. Pick a target from **Hunt access point**, **Hunt devices** or
+   **Enter MAC** and start walking (see [Hunt screen](#hunt-screen)).
 
-The firmware is built with **PlatformIO**, which pulls its own ESP-IDF
-toolchain (pinned to ESP-IDF 6.1), so you don't need a separate ESP-IDF install.
-Install PlatformIO Core once with [pipx](https://pipx.pypa.io/) (e.g.
-`apt install pipx` or `brew install pipx`, then `pipx ensurepath`):
-
-```bash
-pipx install platformio      # later: pipx upgrade platformio
-pio --version                # check it runs
-```
-
-Plain `pip install` into the system Python is refused on most current distros
-(`externally-managed-environment`); `pip install platformio` inside a venv works
-too.
-
-> If `pio` fails with `No module named 'requirements'`, an unrelated PyPI
-> package named `pio` is shadowing PlatformIO's command. Remove it and restore
-> PlatformIO's launcher: `pipx uninstall pio && pipx reinstall platformio`
-> (in a venv: `pip uninstall -y pio && pip install --force-reinstall --no-deps platformio`).
-
-Put the board in **download mode**: hold **BOOT**, tap **RESET**, release
-**BOOT**, then connect the board's own USB-C port to your PC (directly, not
-through the Flipper). Find its port with `pio device list`: it shows up as an
-Espressif / USB serial device (e.g. `COM5` on Windows, `/dev/ttyACM0` or
-`/dev/ttyUSB0` on Linux, `/dev/cu.usbmodem*` on macOS). The **Flipper is a
-serial port too**, so be sure to pick the ESP32-S2.
-
-```bash
-cd firmware
-pio run                                  # build only
-pio run -t upload --upload-port COM5     # build and flash (use your port)
-pio run -t menuconfig                    # optional: pins, baud, LED, max channel
-```
-
-Without `--upload-port` PlatformIO auto-detects, but naming the port makes sure
-you never write to the Flipper. If the upload can't enter the bootloader by
-itself, redo BOOT+RESET right before uploading. Tap **RESET** after flashing to
-boot the new firmware.
-
-> The defaults assume the official board: UART0 on GPIO43/44 to Flipper pins
-> 13/14, an active-low RGB LED on GPIO6/5/4 (R/G/B) and channels up to 13 (set
-> the max channel to 11 for US-style regions). If your clone differs, change
-> them in menuconfig.
-
-### 2. Build and install the Flipper app
-
-From the repo root, `build_app.py` runs `ufbt` with the committed vendor
-database bundled:
-
-```bash
-pipx install ufbt                  # or: pip install ufbt inside a venv
-python3 build_app.py               # build -> flipper_app/dist/wavehound.fap
-python3 build_app.py --launch      # build, upload over USB and run
-python3 build_app.py --update-db   # download the latest manuf, regenerate oui.db, then build
-python3 build_app.py --manuf path/to/manuf.gz  # regenerate oui.db from a local manuf.gz
-python3 build_app.py --update-db --no-build    # only refresh oui.db
-```
-
-Running `ufbt` in `flipper_app/` directly also works and bundles the same
-`oui.db`. Or copy `wavehound.fap` to `SD:/apps/GPIO/` with qFlipper, the same
-folder a Flipper Apps Catalog install uses; the app shows up under
-**Apps → GPIO → Wavehound**. Built against official firmware SDK 1.5.1
-(API 88.2).
-
-### 3. Use it
-
-1. Plug the dev board onto the Flipper and open Wavehound. The app turns on
-   5 V on the GPIO header and takes over the USART from the expansion service.
-2. The menu header changes to **"Wavehound - board OK"** once the board answers.
-3. Pick a target from **Hunt access point**, **Hunt devices** or **Enter MAC**
-   and start walking (see [Hunt screen](#hunt-screen)).
+To build the firmware and app yourself (PlatformIO, ufbt, menuconfig for pins,
+LED and max channel), see [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Repository layout
 

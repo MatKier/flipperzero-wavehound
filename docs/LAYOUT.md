@@ -37,6 +37,9 @@ licenses/GPL-2.0.txt      license of manuf.gz / oui.db
 THIRD_PARTY_NOTICES.md    licenses of what the release binaries and the repo's Wireshark data contain
 docs/PROTOCOL.md          the UART protocol (source of truth for the wire format)
 docs/DISCOVERY.md         logged-in host discovery flow (passes, listen windows, name precedence)
+docs/BUILDING.md          building and flashing from source (PlatformIO, ufbt)
+docs/VENDOR_DB.md         oui.db format, lookup order, refresh, license
+docs/LAYOUT.md            this file
 .github/workflows/release.yml  build app + firmware on every branch push (CI); on a v* tag also publish the release
 .github/workflows/toolchain-check.yml  weekly: open an issue when a newer Flipper SDK or espressif32 platform is released
 ```
