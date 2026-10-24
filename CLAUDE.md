@@ -32,6 +32,7 @@ firmware/main/
   proto.c     UART line I/O            proto.h  has WH_FW_VERSION
   led.c       RGB LED heat indicator (LEDC PWM)
   Kconfig.projbuild  pins, baud, LED, max channel (menuconfig -> Wavehound)
+firmware/git_version.py  PlatformIO pre-script: reconfigure when `git describe` changes (INFO Commit)
 flipper_app/
   application.fam         app manifest (appid, fap_version, assets)
   wavehound.c             entry, board power/expansion, board line parser
