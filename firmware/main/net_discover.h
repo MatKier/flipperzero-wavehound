@@ -50,3 +50,16 @@ void net_discover_elicit_start(const uint8_t mac[6], uint32_t interval_ms);
 
 /** Stop elicitation. Emits `ELICIT,OFF` if it was running. */
 void net_discover_elicit_stop(void);
+
+/**
+ * Fingerprint the host behind `mac`: a short TCP connect-scan of a few common
+ * ports plus an HTTP banner grab, to guess a device class. Its IP is read from
+ * the sweep table (like elicitation; the caller discovers it first). Streams
+ * `FP,BEGIN,<ip>`, `FP,PORT,<n>`, `FP,HTTP,<server_hex>,<title_hex>`,
+ * `FP,TYPE,<label>` and `FP,DONE`, or `FP,ERR,<msg>` if the MAC isn't mapped.
+ * A new start (or a stop, or losing the link) supersedes any scan in flight.
+ */
+void net_discover_fingerprint_start(const uint8_t mac[6]);
+
+/** Cancel an in-flight / pending fingerprint. Silent (no FP,DONE). */
+void net_discover_fingerprint_stop(void);

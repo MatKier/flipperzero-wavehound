@@ -59,6 +59,9 @@ description: |
     quiet client so it can be located; shows the device's IP and hostname.
   - **Enter MAC** - hunt any MAC directly, on auto-hop or a pinned channel.
   - **Device details** - MAC vendor (OUI) lookup, type, channel and signal.
+  - **Fingerprint a target** - when logged in, an optional active port-scan and
+    web-banner check that labels a device (printer, camera, web service) and
+    lists its open ports.
   - **Saved MACs** - keep favorites on the SD card and relaunch them.
   - **Saved APs** - manage saved access-point passwords (edit / delete).
   - **Channel spectrum** - per-channel activity bars for channels 1-13.

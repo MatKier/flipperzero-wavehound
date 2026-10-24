@@ -68,7 +68,7 @@ board, not about where the code can run.)
 
 Controls:
 
-- **Hunt:** OK = mute/unmute, Left = reset peak, Right = save target, Down = toggle the elicitation ping (only when logged in and the IP is known), Back = return to the list
+- **Hunt:** OK = mute/unmute, Left = reset peak, Right = save target, Down = toggle the elicitation ping, Up = fingerprint the target (both only when logged in and the IP is known), Back = return to the list
 - **Target list (live scan):** scroll and pick any entry while scanning continues; the first entry, "~ Search again", clears the list and restarts the scan; Back stops scanning and returns
 - **Spectrum:** OK/Left/Right = change metric, Back = return to menu
 
@@ -120,13 +120,27 @@ measure. The rate is capped and set by **Ping interval** in Settings
 flood or a denial-of-service tool, and it is deliberately built so it cannot be
 turned into one.
 
+### Fingerprinting a device (optional)
+
+When you are logged in and a device's IP is known, Wavehound can take a guess at
+*what the device is*. Press the center button (**Scan**) on its details screen,
+or **Up** while hunting it, and the board makes a quick check of a handful of
+common TCP ports (SSH, HTTP/S, SMB, RTSP, printer) and peeks at its web page, then
+shows the open ports, the web server it runs and a label such as *Network
+printer*, *RTSP camera* or *Web service*. Like the elicitation ping this is an
+**active** probe — it briefly connects to the device — so it is offered only on
+the authorized-login path, runs once per press, and only ever touches the single
+device you are inspecting (one connection attempt per port, nothing broader). It
+needs board firmware v17 or newer. HTTPS is noted but not inspected (the board
+speaks no TLS). Leaving the result screen cancels a scan still in progress.
+
 > **Authorized use only.** Logging in transmits and joins a network, unlike the
 > rest of Wavehound. Only do this on a network you own or are explicitly
 > authorized to use, against a device you are authorized to locate. Saved
 > passwords are stored in plaintext on the (unencrypted) SD card. Login appears
-> with board firmware v9 or newer and the elicitation ping needs v12 or newer;
-> the login options are hidden on older firmware. (Prebuilt releases ship the
-> matching firmware.)
+> with board firmware v9 or newer, the elicitation ping needs v12 or newer and
+> the fingerprint needs v17 or newer; these options are hidden on older firmware.
+> (Prebuilt releases ship the matching firmware.)
 
 ## Layout
 

@@ -10,6 +10,8 @@ static void wh_scene_details_button_cb(GuiButtonType result, InputType type, voi
     if(type != InputTypeShort) return;
     if(result == GuiButtonTypeLeft) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WhEventDetailsSave);
+    } else if(result == GuiButtonTypeCenter) {
+        view_dispatcher_send_custom_event(app->view_dispatcher, WhEventDetailsFingerprint);
     } else if(result == GuiButtonTypeRight) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WhEventDetailsHunt);
     }
@@ -60,6 +62,11 @@ void wh_scene_details_on_enter(void* context) {
 
     widget_add_button_element(w, GuiButtonTypeLeft, "Save", wh_scene_details_button_cb, app);
     widget_add_button_element(w, GuiButtonTypeRight, "Hunt", wh_scene_details_button_cb, app);
+    /* Center "Scan" fingerprints the target -- active, so only when logged in and
+     * the station's IP is known (same gate as the hunt screen's scan/ping). */
+    if(wh_fingerprint_avail(app)) {
+        widget_add_button_element(w, GuiButtonTypeCenter, "Scan", wh_scene_details_button_cb, app);
+    }
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WhViewWidget);
 }
@@ -70,6 +77,11 @@ bool wh_scene_details_on_event(void* context, SceneManagerEvent event) {
 
     if(event.event == WhEventDetailsHunt) {
         scene_manager_next_scene(app->scene_manager, WhSceneHunt);
+        return true;
+    }
+    if(event.event == WhEventDetailsFingerprint) {
+        /* The fingerprint scene's on_enter sends FP for app->target. */
+        scene_manager_next_scene(app->scene_manager, WhSceneFingerprint);
         return true;
     }
     if(event.event == WhEventDetailsSave) {

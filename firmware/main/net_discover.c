@@ -1,7 +1,10 @@
 #include "net_discover.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -35,6 +38,15 @@
 #define ND_QUERY_DRAIN_MS 1000       /* listen for mDNS/SSDP answers after sending the queries */
 #define ND_QUERY_SENDS 2             /* send the queries after this many passes (power-save misses) */
 #define ND_RX_MAX 1500               /* one mDNS/SSDP datagram (a UDP truncate would lose records) */
+
+/* Fingerprint: a short active probe of one host behind a known MAC -- a TCP
+ * connect-scan of a few common ports plus an HTTP banner grab -- to guess what
+ * the device is. Active (it opens connections), so the app gates it behind the
+ * authorized-use flow, like elicitation. */
+#define ND_FP_CONNECT_MS 500         /* per-port non-blocking connect timeout */
+#define ND_FP_HTTP_MS 900            /* HTTP banner grab send/recv timeout */
+#define ND_FP_HTTP_MAX 1024          /* bytes of the HTTP response we read/parse */
+#define ND_FP_BANNER_MAX 48          /* Server: / <title> buffer incl. NUL */
 
 typedef struct {
     uint8_t mac[6];
@@ -91,6 +103,13 @@ static volatile uint32_t s_elicit_interval_ms;
 static volatile uint32_t s_elicit_ip; /* resolved target IP (network order), 0 = unknown */
 static uint8_t s_elicit_mac[6]; /* guarded by s_lock: a retarget rewrites all 6 bytes */
 static volatile uint32_t s_arp_target; /* IP handed to the tcpip-thread ARP sender */
+
+/* Fingerprint: its own task, one scan at a time. s_fp_gen bumps on every start
+ * and stop so an in-flight scan can tell it was superseded/cancelled and bail. */
+static TaskHandle_t s_fp_task;
+static volatile bool s_fp_active;
+static volatile uint32_t s_fp_gen;
+static uint8_t s_fp_mac[6]; /* guarded by s_lock */
 
 /* --- shared host table (hold s_lock) --- */
 
@@ -1200,6 +1219,233 @@ static void elicit_task(void *arg)
     }
 }
 
+/* --- fingerprint (its own task; plain BSD sockets, no radio/tcpip calls) --- */
+
+/* The ports probed, lowest first. Kept small and purposeful: each one maps to a
+ * recognizable kind of device so the connect-scan stays a light inventory, not a
+ * broad scan. HTTP is grabbed only on the cleartext web ports (80/8080); 443 is
+ * TLS, which we don't speak, so it only contributes to the classification. */
+static const uint16_t k_fp_ports[] = {22, 23, 80, 443, 445, 554, 8080, 9100};
+#define FP_PORT_COUNT (sizeof(k_fp_ports) / sizeof(k_fp_ports[0]))
+
+/* True if a non-blocking connect to ip:port completes within ND_FP_CONNECT_MS. */
+static bool fp_port_open(uint32_t ip_net, uint16_t port)
+{
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0) {
+        return false;
+    }
+    int flags = fcntl(s, F_GETFL, 0);
+    fcntl(s, F_SETFL, flags | O_NONBLOCK);
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_port = lwip_htons(port);
+    a.sin_addr.s_addr = ip_net;
+    bool open = false;
+    int r = connect(s, (struct sockaddr *)&a, sizeof(a));
+    if (r == 0) {
+        open = true; /* connected immediately (rare on a LAN, but possible) */
+    } else if (errno == EINPROGRESS) {
+        fd_set wf;
+        FD_ZERO(&wf);
+        FD_SET(s, &wf);
+        struct timeval tv = {ND_FP_CONNECT_MS / 1000, (ND_FP_CONNECT_MS % 1000) * 1000};
+        if (select(s + 1, NULL, &wf, NULL, &tv) > 0) {
+            int err = 0;
+            socklen_t el = sizeof(err);
+            getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &el);
+            open = (err == 0); /* a refusal (ECONNREFUSED) also wakes select */
+        }
+    }
+    close(s);
+    return open;
+}
+
+/* Case-insensitive search for needle in the first n bytes of hay. */
+static const char *fp_ci_find(const char *hay, int n, const char *needle)
+{
+    int nl = (int)strlen(needle);
+    for (int i = 0; i + nl <= n; i++) {
+        if (strncasecmp(hay + i, needle, nl) == 0) {
+            return hay + i;
+        }
+    }
+    return NULL;
+}
+
+/* Copy src up to a terminator byte (CR/LF/'<') into out, trimming leading spaces
+ * and capping the length. For the Server: value and the <title> text. */
+static void fp_copy_field(const char *src, int avail, char *out, size_t out_sz)
+{
+    while (avail > 0 && (*src == ' ' || *src == '\t')) {
+        src++;
+        avail--;
+    }
+    size_t n = 0;
+    while (avail > 0 && n + 1 < out_sz && *src != '\r' && *src != '\n' && *src != '<') {
+        out[n++] = *src++;
+        avail--;
+    }
+    out[n] = '\0';
+}
+
+/* Open http://ip:port/, read the start of the response and pull the Server:
+ * header and the <title>. Either may come back empty. Best-effort. */
+static void fp_http_grab(uint32_t ip_net, uint16_t port, char *server, char *title)
+{
+    server[0] = '\0';
+    title[0] = '\0';
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0) {
+        return;
+    }
+    struct timeval tv = {ND_FP_HTTP_MS / 1000, (ND_FP_HTTP_MS % 1000) * 1000};
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_port = lwip_htons(port);
+    a.sin_addr.s_addr = ip_net;
+    if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) {
+        char ipstr[16];
+        char req[96];
+        ip4addr_ntoa_r((const ip4_addr_t *)&ip_net, ipstr, sizeof(ipstr));
+        int rn = snprintf(req, sizeof(req),
+                          "GET / HTTP/1.0\r\nHost: %s\r\nUser-Agent: Wavehound\r\n"
+                          "Connection: close\r\n\r\n",
+                          ipstr);
+        if (send(s, req, rn, 0) == rn) {
+            char buf[ND_FP_HTTP_MAX];
+            int total = 0;
+            int r;
+            while (total < (int)sizeof(buf) - 1 &&
+                   (r = recv(s, buf + total, sizeof(buf) - 1 - total, 0)) > 0) {
+                total += r;
+            }
+            buf[total] = '\0';
+            const char *h = fp_ci_find(buf, total, "\nserver:");
+            if (h) {
+                int off = (int)(h - buf) + 8; /* past "\nserver:" */
+                fp_copy_field(buf + off, total - off, server, ND_FP_BANNER_MAX);
+            }
+            const char *t = fp_ci_find(buf, total, "<title>");
+            if (t) {
+                int off = (int)(t - buf) + 7; /* past "<title>" */
+                fp_copy_field(buf + off, total - off, title, ND_FP_BANNER_MAX);
+            }
+        }
+    }
+    close(s);
+}
+
+/* Guess a device class from the open ports and the HTTP Server string. The
+ * labels mirror the discovery <type> vocabulary; "" means no guess. The most
+ * specific signal wins, so the order here matters. */
+static const char *fp_classify(const bool *open, const char *server)
+{
+    const bool web = open[2] || open[6] || open[3]; /* 80 / 8080 / 443 */
+    if (fp_ci_find(server, (int)strlen(server), "camera") ||
+        fp_ci_find(server, (int)strlen(server), "hikvision") ||
+        fp_ci_find(server, (int)strlen(server), "dahua") ||
+        fp_ci_find(server, (int)strlen(server), "ipcam")) {
+        return "IP camera";
+    }
+    if (open[7]) {                 /* 9100 JetDirect */
+        return "Network printer";
+    }
+    if (fp_ci_find(server, (int)strlen(server), "printer") ||
+        fp_ci_find(server, (int)strlen(server), "jetdirect")) {
+        return "Network printer";
+    }
+    if (open[5]) {                 /* 554 RTSP */
+        return "RTSP camera";
+    }
+    if (open[4]) {                 /* 445 SMB */
+        return "File share";
+    }
+    if (web) {
+        return "Web service";
+    }
+    if (open[0]) {                 /* 22 SSH */
+        return "SSH host";
+    }
+    if (open[1]) {                 /* 23 Telnet */
+        return "Telnet host";
+    }
+    for (size_t i = 0; i < FP_PORT_COUNT; i++) {
+        if (open[i]) {
+            return "Network host";
+        }
+    }
+    return "";
+}
+
+static void fp_run_scan(uint32_t gen, uint32_t ip_net)
+{
+    char ipstr[16];
+    ip4addr_ntoa_r((const ip4_addr_t *)&ip_net, ipstr, sizeof(ipstr));
+    proto_sendf("FP,BEGIN,%s", ipstr);
+
+    bool open[FP_PORT_COUNT] = {0};
+    for (size_t i = 0; i < FP_PORT_COUNT; i++) {
+        if (!s_fp_active || s_fp_gen != gen || !s_connected) {
+            return; /* cancelled / superseded / link lost: no FP,DONE */
+        }
+        if (fp_port_open(ip_net, k_fp_ports[i])) {
+            open[i] = true;
+            proto_sendf("FP,PORT,%u", (unsigned)k_fp_ports[i]);
+        }
+    }
+
+    /* HTTP banner on the first open cleartext web port (80, then 8080). */
+    char server[ND_FP_BANNER_MAX] = "";
+    char title[ND_FP_BANNER_MAX] = "";
+    if ((open[2] || open[6]) && s_fp_active && s_fp_gen == gen && s_connected) {
+        fp_http_grab(ip_net, open[2] ? 80 : 8080, server, title);
+        if (server[0] || title[0]) {
+            char server_hex[2 * ND_FP_BANNER_MAX];
+            char title_hex[2 * ND_FP_BANNER_MAX];
+            proto_hex_encode(server, strlen(server), server_hex, sizeof(server_hex));
+            proto_hex_encode(title, strlen(title), title_hex, sizeof(title_hex));
+            proto_sendf("FP,HTTP,%s,%s", server_hex, title_hex);
+        }
+    }
+
+    const char *type = fp_classify(open, server);
+    if (type[0]) {
+        proto_sendf("FP,TYPE,%s", type);
+    }
+    proto_sendf("FP,DONE");
+}
+
+static void fp_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        if (!s_fp_active || !s_connected) {
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+        const uint32_t gen = s_fp_gen;
+        uint8_t mac[6];
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        memcpy(mac, s_fp_mac, 6);
+        xSemaphoreGive(s_lock);
+
+        uint32_t ip = 0;
+        if (net_discover_lookup(mac, &ip) && ip) {
+            fp_run_scan(gen, ip);
+        } else {
+            proto_sendf("FP,ERR,no ip"); /* MAC not mapped yet: caller should RESOLVE first */
+        }
+        /* Go idle only if this scan is still the current one; a start/stop that
+         * bumped the generation leaves s_fp_active for the next loop to act on. */
+        if (s_fp_gen == gen) {
+            s_fp_active = false;
+        }
+    }
+}
+
 /* --- public API --- */
 
 void net_discover_init(void)
@@ -1208,6 +1454,7 @@ void net_discover_init(void)
     s_snapshot_done = xSemaphoreCreateBinary();
     xTaskCreate(netscan_task, "netscan", 4096, NULL, 4, &s_task);
     xTaskCreate(elicit_task, "elicit", 3072, NULL, 4, &s_elicit_task);
+    xTaskCreate(fp_task, "fingerprint", 4096, NULL, 4, &s_fp_task);
 }
 
 void net_discover_on_gotip(esp_netif_t *netif, uint32_t ip, uint32_t mask, uint32_t dns)
@@ -1232,6 +1479,7 @@ void net_discover_on_down(void)
 {
     s_connected = false;
     net_discover_elicit_stop();
+    net_discover_fingerprint_stop();
     if (s_elicit_task) {
         xTaskNotifyGive(s_elicit_task); /* let the elicit task close its socket */
     }
@@ -1310,5 +1558,26 @@ void net_discover_elicit_stop(void)
     }
     if (was_active) {
         proto_sendf("ELICIT,OFF");
+    }
+}
+
+void net_discover_fingerprint_start(const uint8_t mac[6])
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    memcpy(s_fp_mac, mac, 6);
+    xSemaphoreGive(s_lock);
+    s_fp_gen++;        /* supersede any scan already in flight */
+    s_fp_active = true;
+    if (s_fp_task) {
+        xTaskNotifyGive(s_fp_task);
+    }
+}
+
+void net_discover_fingerprint_stop(void)
+{
+    s_fp_active = false;
+    s_fp_gen++;        /* an in-flight scan sees the bump and bails (no FP,DONE) */
+    if (s_fp_task) {
+        xTaskNotifyGive(s_fp_task);
     }
 }

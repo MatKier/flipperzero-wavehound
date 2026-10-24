@@ -103,6 +103,24 @@ void wh_ap_connect(WavehoundApp* app) {
     wh_send(app, cmd);
 }
 
+bool wh_fingerprint_avail(WavehoundApp* app) {
+    return app->conn.connected && !app->target.is_ap && app->target.ip[0] != '\0' &&
+           app->board_fw_version >= WH_FW_FP_MIN;
+}
+
+void wh_fingerprint_start(WavehoundApp* app) {
+    furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+    memset(&app->fp, 0, sizeof(app->fp));
+    strlcpy(app->fp.mac, app->target.mac, sizeof(app->fp.mac));
+    strlcpy(app->fp.ip, app->target.ip, sizeof(app->fp.ip));
+    app->fp.running = true;
+    furi_mutex_release(app->results_mutex);
+
+    char cmd[24];
+    snprintf(cmd, sizeof(cmd), "FP,%s", app->target.mac);
+    wh_send(app, cmd);
+}
+
 void wh_ap_login_proceed(WavehoundApp* app) {
     /* Continue from the login flow to the client list: collapse back to
      * ChannelSelect, which resumes with the pending pick and pushes the client
@@ -281,6 +299,41 @@ static void wh_on_line(char* line, void* context) {
                 strlcpy(app->target.dtype, dtype, sizeof(app->target.dtype));
             wh_hunt_view_set_ip(app->hunt, app->target.ip, app->target.host, app->target.dtype);
         }
+    } else if(strcmp(tag, "FP") == 0) {
+        /* FP,BEGIN,<ip> | FP,PORT,<n> | FP,HTTP,<server_hex>,<title_hex> |
+         * FP,TYPE,<label> | FP,DONE | FP,ERR,<msg> -- accumulate into app->fp and
+         * nudge the fingerprint scene to redraw. */
+        const char* state = next_field(&cur);
+        if(!state) return;
+        furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+        if(strcmp(state, "BEGIN") == 0) {
+            const char* ip = next_field(&cur);
+            if(ip) strlcpy(app->fp.ip, ip, sizeof(app->fp.ip));
+            app->fp.running = true;
+            app->fp.done = false;
+            app->fp.err = false;
+        } else if(strcmp(state, "PORT") == 0) {
+            uint16_t port = (uint16_t)field_int(&cur);
+            if(port && app->fp.port_count < WH_FP_MAX_PORTS)
+                app->fp.ports[app->fp.port_count++] = port;
+        } else if(strcmp(state, "HTTP") == 0) {
+            const char* server_hex = next_field(&cur);
+            const char* title_hex = next_field(&cur);
+            if(server_hex) wh_hex_decode(server_hex, app->fp.server, sizeof(app->fp.server));
+            if(title_hex) wh_hex_decode(title_hex, app->fp.title, sizeof(app->fp.title));
+        } else if(strcmp(state, "TYPE") == 0) {
+            strlcpy(app->fp.dtype, cur ? cur : "", sizeof(app->fp.dtype));
+        } else if(strcmp(state, "DONE") == 0) {
+            app->fp.running = false;
+            app->fp.done = true;
+        } else if(strcmp(state, "ERR") == 0) {
+            strlcpy(app->fp.err_msg, cur ? cur : "failed", sizeof(app->fp.err_msg));
+            app->fp.err = true;
+            app->fp.running = false;
+            app->fp.done = true;
+        }
+        furi_mutex_release(app->results_mutex);
+        view_dispatcher_send_custom_event(app->view_dispatcher, WhEventFingerprintUpdate);
     } else if(strcmp(tag, "INFO_BEGIN") == 0) {
         furi_mutex_acquire(app->results_mutex, FuriWaitForever);
         furi_string_set(app->board_info, "\e#Board info\n");
@@ -373,6 +426,12 @@ static void wh_hunt_elicit_cb(void* context) {
     view_dispatcher_send_custom_event(app->view_dispatcher, WhEventElicitToggle);
 }
 
+/* Hunt view asks (Up key) to fingerprint the target. */
+static void wh_hunt_fingerprint_cb(void* context) {
+    WavehoundApp* app = context;
+    view_dispatcher_send_custom_event(app->view_dispatcher, WhEventHuntFingerprint);
+}
+
 /* ---------- dispatcher plumbing ---------- */
 
 static bool wh_custom_event_callback(void* context, uint32_t event) {
@@ -421,6 +480,7 @@ static WavehoundApp* wh_app_alloc(void) {
     app->hunt = wh_hunt_view_alloc();
     wh_hunt_view_set_save_callback(app->hunt, wh_hunt_save_cb, app);
     wh_hunt_view_set_elicit_callback(app->hunt, wh_hunt_elicit_cb, app);
+    wh_hunt_view_set_fingerprint_callback(app->hunt, wh_hunt_fingerprint_cb, app);
     view_dispatcher_add_view(app->view_dispatcher, WhViewHunt, wh_hunt_view_get_view(app->hunt));
     app->spectrum = wh_spectrum_view_alloc();
     view_dispatcher_add_view(

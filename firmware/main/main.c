@@ -259,6 +259,26 @@ static void handle_elicit(char *args)
     }
 }
 
+static void handle_fp(char *args)
+{
+    /* "FP,<mac>" starts a fingerprint; "FP,STOP" cancels it. */
+    char *f[1] = {0};
+    int n = split_args(args, f, 1);
+    if (n >= 1 && strcasecmp(f[0], "STOP") == 0) {
+        radio_fingerprint_stop();
+        proto_sendf("OK,FP");
+        return;
+    }
+    uint8_t mac[6];
+    if (n < 1 || !parse_mac(f[0], mac)) {
+        proto_sendf("ERR,usage FP,<mac> | FP,STOP");
+        return;
+    }
+    if (radio_fingerprint_start(mac)) {
+        proto_sendf("OK,FP");
+    }
+}
+
 static void handle_line(char *line)
 {
     char *args = strchr(line, ',');
@@ -287,6 +307,8 @@ static void handle_line(char *line)
         handle_wps(args);
     } else if (strcmp(line, "ELICIT") == 0) {
         handle_elicit(args);
+    } else if (strcmp(line, "FP") == 0) {
+        handle_fp(args);
     } else if (strcmp(line, "RESOLVE") == 0) {
         /* Re-run host discovery; any resolved IP/host streams back as IP lines.
          * An optional MAC arg (RESOLVE,<mac>) is ignored -- the sweep is

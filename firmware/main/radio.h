@@ -79,6 +79,16 @@ void radio_elicit_stop(void);
 bool radio_resolve(void);
 
 /**
+ * Fingerprint the host behind `mac` (a client of the associated AP): a short
+ * active port-scan + HTTP banner grab that streams `FP,...` lines. Requires a
+ * DHCP lease; returns false (and reports `ERR`) if not connected.
+ */
+bool radio_fingerprint_start(const uint8_t mac[6]);
+
+/** Cancel an in-flight / pending fingerprint. */
+void radio_fingerprint_stop(void);
+
+/**
  * Fill short association / IPv4 strings for the INFO block. Each is set to "-"
  * when not associated or without a lease yet. `ssid` should hold >= 33 bytes and
  * `ip` >= 16; either pointer may be NULL to skip it.
