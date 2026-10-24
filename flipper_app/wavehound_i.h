@@ -35,6 +35,13 @@
  * screen only asks older boards to re-resolve if they understand it. */
 #define WH_FW_RESOLVE_MIN 15
 
+/* The board firmware version at which the FP (fingerprint) command appeared; the
+ * Scan action is hidden on older boards, which would answer it ERR. */
+#define WH_FW_FP_MIN 17
+
+/* Ports a fingerprint can report (the board's fixed scan set, see PROTOCOL.md). */
+#define WH_FP_MAX_PORTS 8
+
 typedef enum {
     WhViewSubmenu,
     WhViewByteInput,
@@ -63,6 +70,9 @@ typedef enum {
     WhEventApSave,      /* save-prompt: store the credentials */
     WhEventApDiscard,   /* save-prompt: don't store / skip */
     WhEventElicitToggle, /* hunt screen: Down pressed to toggle the elicitation ping */
+    WhEventDetailsFingerprint, /* details screen: center pressed to fingerprint the target */
+    WhEventHuntFingerprint,    /* hunt screen: Up pressed to fingerprint the target */
+    WhEventFingerprintUpdate,  /* an FP,... line arrived: redraw the fingerprint scene */
 } WhCustomEvent;
 
 /** A hunt target the user saved by name, persisted to the SD card. */
@@ -111,6 +121,22 @@ typedef struct {
     char host[33];
     char dtype[16];
 } WhPendingIp;
+
+/** A target fingerprint, built from the board's FP,... lines (guarded by
+ * results_mutex; the fingerprint scene reads it on WhEventFingerprintUpdate). */
+typedef struct {
+    char mac[18];
+    char ip[16];
+    bool running;  /* a scan is in progress (FP,BEGIN seen, no FP,DONE yet) */
+    bool done;     /* the scan finished (FP,DONE or FP,ERR) */
+    bool err;      /* the scan could not run (FP,ERR) */
+    char err_msg[24];
+    uint16_t ports[WH_FP_MAX_PORTS];
+    uint8_t port_count;
+    char server[40]; /* HTTP Server: header, else empty */
+    char title[40];  /* HTTP page <title>, else empty */
+    char dtype[16];  /* board's device-class guess, else empty */
+} WhFingerprint;
 
 /** A saved AP credential, persisted to the SD card (plaintext, like saved MACs). */
 typedef struct {
@@ -174,6 +200,7 @@ typedef struct {
     bool channel_pick_pending; /* an AP was picked; ChannelSelect continues */
 
     WhTarget target; /* what the Hunt scene follows */
+    WhFingerprint fp; /* result of the last/running fingerprint (results_mutex) */
     uint8_t mac_bytes[6]; /* ByteInput buffer, keeps the last entered MAC */
     bool from_saved_hunt; /* hunt was launched from a saved MAC: apply saved_hunt_mode */
 
@@ -218,6 +245,13 @@ void wh_ap_connect(WavehoundApp* app);
 
 /** Continue from the AP-login flow to the client list (collapses to ChannelSelect). */
 void wh_ap_login_proceed(WavehoundApp* app);
+
+/** Whether a fingerprint can be run on app->target now: associated, the target
+ * is a station with a known IP, and the board firmware supports FP. */
+bool wh_fingerprint_avail(WavehoundApp* app);
+
+/** Reset app->fp for app->target and send FP,<mac> to begin a scan. */
+void wh_fingerprint_start(WavehoundApp* app);
 
 /** Parse "aa:bb:cc:dd:ee:ff" into bytes. Returns false on malformed input. */
 bool wh_parse_mac(const char* str, uint8_t mac[6]);

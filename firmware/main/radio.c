@@ -1012,6 +1012,21 @@ bool radio_resolve(void)
     return true;
 }
 
+bool radio_fingerprint_start(const uint8_t mac[6])
+{
+    if (!s_got_ip) {
+        proto_sendf("FP,ERR,needs a connection");
+        return false;
+    }
+    net_discover_fingerprint_start(mac);
+    return true;
+}
+
+void radio_fingerprint_stop(void)
+{
+    net_discover_fingerprint_stop();
+}
+
 void radio_conn_summary(char *ssid, size_t ssid_sz, char *ip, size_t ip_sz)
 {
     if (ssid && ssid_sz) {

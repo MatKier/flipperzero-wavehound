@@ -17,6 +17,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `DISCONNECT`          | Drop the association and return to pure receive-only sniffing. Answered with `CONN,DOWN`. |
 | `WPS` / `WPS,STOP`    | Start / cancel WPS push-button (PBC) enrolment (v10+). On success the board reports the negotiated credentials ([`WPS,OK,...`](#wps)) and associates; `WPS,STOP` cancels an armed exchange. |
 | `ELICIT,<mac>,<ms>` / `ELICIT,STOP` | Start / stop poking a target so a silent device can be hunted (v12+). Needs a DHCP lease (else `ERR`). The board pings `<mac>` every `<ms>` (clamped 50-1000) with a unicast ARP request and an ICMP echo; the replies are frames the hunt samples. The target's IP is taken from the [host-discovery](#host-discovery) table. See [Elicitation](#elicitation). |
+| `FP,<mac>` / `FP,STOP` | Start / cancel a target [fingerprint](#fingerprinting) (v17+). Needs a DHCP lease (else `FP,ERR`). The board runs a short active TCP connect-scan of a few common ports on `<mac>`'s host plus an HTTP banner grab, and streams `FP,...` lines ending in `FP,DONE`. The target's IP is taken from the [host-discovery](#host-discovery) table. |
 | `RESOLVE[,<mac>]` | Re-run [host discovery](#host-discovery) now (v15+): a fresh host-discovery sweep (ARP, then the mDNS/SSDP and name lookups) that re-announces every known host as `IP,...`. A no-op without a lease. The app sends this while a hunt target's IP is still unknown, so it (and its name) can fill in on the hunt screen. The optional `<mac>` is ignored — the sweep is subnet-wide — but accepted for forward compatibility. |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
 | `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. The idle LED stays lit (blue). |
@@ -65,6 +66,12 @@ put `PIN` before any token.
 | `WPS,<state>[,...]`                            | WPS push-button progress (v10+). See [WPS](#wps). |
 | `IP,<mac>,<ip>[,<host_hex>[,<type>]]`          | A host found on the associated subnet (v11+): its MAC, IPv4, and — once a best-effort lookup finds one — its [hex-encoded](#hex-encoded-fields) hostname. Streamed as an ARP sweep learns hosts; the IP is sent first and the same line is re-sent with a hostname if one is resolved. `<type>` (v16+) is a short device-class label such as `Chromecast` or `Printer`, the rest of the line (spaces allowed, never a comma); it is absent when unknown, and the host field is left empty (`IP,<mac>,<ip>,,Printer`) when only a type is known. Older apps stop reading at the host field and ignore it. The app matches by `<mac>` to annotate list/hunt rows. See [Host discovery](#host-discovery). |
 | `ELICIT,ON,<ms>` / `ELICIT,OFF`                | Elicitation state (v12+): poking `<mac>` every `<ms>` has started / stopped. |
+| `FP,BEGIN,<ip>`                                | A [fingerprint](#fingerprinting) scan of the host at `<ip>` has started (v17+). |
+| `FP,PORT,<port>`                               | That host has TCP `<port>` open (one line per open port). |
+| `FP,HTTP,<server_hex>,<title_hex>`             | HTTP banner from the host's web port: the `Server:` header and page `<title>`, each [hex-encoded](#hex-encoded-fields) (either may be empty). Sent only if one was read. |
+| `FP,TYPE,<label>`                              | The board's device-class guess for the host (rest of line, no comma), e.g. `Network printer`, `RTSP camera`, `Web service`. Omitted when nothing matched. |
+| `FP,DONE`                                      | The fingerprint scan finished. |
+| `FP,ERR,<reason>`                              | A fingerprint could not run (no lease, or the MAC isn't mapped yet). |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Commit, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Assoc, IP, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `Firmware` is the board firmware version (the same value carried by `READY`/`PONG`); `Commit` is the build system's version string (`git describe` for a git checkout, else `version.txt`/`PROJECT_VER`). `Assoc` is the SSID the board is associated with (`-` when not), `IP` its DHCP lease (`-` when none). `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |
 | `INFO_END`                                     | End of an `INFO` reply.               |
@@ -173,5 +180,28 @@ isn't mapped the board sends nothing that interval (it does not itself trigger a
 sweep); `ELICIT,ON` is still reported. `ELICIT,STOP`, `STOP`, `SLEEP` and losing
 the link all stop it. The board emits `ELICIT,ON,<ms>` / `ELICIT,OFF` as it
 starts/stops.
+
+### Fingerprinting
+
+`FP,<mac>` (v17+) asks the board to guess what a host *is*. Like elicitation it
+needs a DHCP lease and reads the target IP from the [host-discovery](#host-discovery)
+table (so the caller resolves it first); an unmapped MAC answers `FP,ERR,no ip`.
+The scan is **active** — it opens TCP connections — so the app offers it only on
+the same authorized-use path as login and elicitation.
+
+The board makes one non-blocking TCP connect (short timeout) to each of a small,
+fixed set of ports — 22 (SSH), 23 (Telnet), 80 (HTTP), 443 (HTTPS), 445 (SMB),
+554 (RTSP), 8080 (HTTP-alt), 9100 (JetDirect/printer) — and streams an `FP,PORT,<port>`
+line for each that answers. If a cleartext web port (80, then 8080) is open it
+also fetches `GET /` and reports the `Server:` header and page `<title>` as
+`FP,HTTP,...`; 443 is TLS, which the board does not speak, so it only counts
+toward the guess. The board then picks a device-class `<label>` from the open
+ports and the `Server:` string (printer/camera signals win over a generic web or
+login service) and sends `FP,TYPE,<label>`, then `FP,DONE`. The labels are chosen
+by the board; the Flipper only displays them.
+
+It is a one-shot, single-target probe, not a scanner: one connection attempt per
+port to the one host being inspected. A new `FP`, an `FP,STOP`, or losing the
+link supersedes a scan already in flight (which then ends without `FP,DONE`).
 
 SSIDs are sanitized: control characters become `?`, so every message stays on one line.

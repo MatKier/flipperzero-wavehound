@@ -1,3 +1,15 @@
+## v1.17
+
+- **Fingerprint a target.** When you are logged in to a network and a device's IP
+  is known, you can now ask the board what the device *is*: a quick check of a
+  few common ports plus a peek at its web page labels it as, say, a *Network
+  printer*, *RTSP camera* or *Web service*, and lists the open ports and the web
+  server it runs. Press the center button ("Scan") on a device's details screen,
+  or **Up** while hunting it. This is an **active** probe — it briefly connects to
+  the device — so it is offered only on the same authorized-login path as the
+  elicitation ping, and only against the single device you are inspecting. Needs
+  board firmware v17 or newer; older boards simply don't offer it.
+
 ## v1.16
 
 - **Friendlier device names and types.** While joined to a network, the board now

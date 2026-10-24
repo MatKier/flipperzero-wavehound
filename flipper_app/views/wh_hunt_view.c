@@ -42,6 +42,7 @@ typedef struct {
     char dtype[16];    /* target device class (label when there is no hostname), else empty */
     bool elicit_avail; /* elicitation offered (connected + IP known) */
     bool elicit_on;    /* elicitation currently running */
+    bool fp_avail;     /* fingerprint offered (connected + IP known + fw): gates Up */
 } WhHuntModel;
 
 struct WhHuntView {
@@ -59,6 +60,8 @@ struct WhHuntView {
     void* save_ctx;
     WhHuntElicitCallback elicit_cb;
     void* elicit_ctx;
+    WhHuntFingerprintCallback fp_cb;
+    void* fp_ctx;
 };
 
 static float rssi_fraction(float rssi, int8_t floor, int8_t ceil) {
@@ -240,6 +243,15 @@ static bool wh_hunt_input(InputEvent* event, void* context) {
         }
         return false;
     }
+    if(event->key == InputKeyUp) {
+        bool avail = false;
+        with_view_model(hunt->view, WhHuntModel * m, { avail = m->fp_avail; }, false);
+        if(avail && hunt->fp_cb) {
+            hunt->fp_cb(hunt->fp_ctx);
+            return true;
+        }
+        return false;
+    }
     return false;
 }
 
@@ -387,6 +399,18 @@ void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, voi
 void wh_hunt_view_set_elicit_callback(WhHuntView* hunt, WhHuntElicitCallback cb, void* context) {
     hunt->elicit_cb = cb;
     hunt->elicit_ctx = context;
+}
+
+void wh_hunt_view_set_fingerprint_callback(
+    WhHuntView* hunt,
+    WhHuntFingerprintCallback cb,
+    void* context) {
+    hunt->fp_cb = cb;
+    hunt->fp_ctx = context;
+}
+
+void wh_hunt_view_set_fingerprint_available(WhHuntView* hunt, bool available) {
+    with_view_model(hunt->view, WhHuntModel * m, { m->fp_avail = available; }, true);
 }
 
 void wh_hunt_view_set_ip(

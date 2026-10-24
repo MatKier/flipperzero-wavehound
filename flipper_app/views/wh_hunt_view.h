@@ -12,6 +12,9 @@ typedef void (*WhHuntSaveCallback)(void* context);
 /** Called when the user presses Down to toggle the elicitation ping. */
 typedef void (*WhHuntElicitCallback)(void* context);
 
+/** Called when the user presses Up to fingerprint the target. */
+typedef void (*WhHuntFingerprintCallback)(void* context);
+
 WhHuntView* wh_hunt_view_alloc(void);
 void wh_hunt_view_free(WhHuntView* hunt);
 View* wh_hunt_view_get_view(WhHuntView* hunt);
@@ -21,6 +24,17 @@ void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, voi
 
 /** Register the callback fired when the user presses Down to toggle elicitation. */
 void wh_hunt_view_set_elicit_callback(WhHuntView* hunt, WhHuntElicitCallback cb, void* context);
+
+/** Register the callback fired when the user presses Up to fingerprint the target. */
+void wh_hunt_view_set_fingerprint_callback(
+    WhHuntView* hunt,
+    WhHuntFingerprintCallback cb,
+    void* context);
+
+/** Whether a fingerprint can be run here (connected + target IP known + fw). When
+ * false, the Up key does nothing (there is no on-screen hint: the hunt view is
+ * deliberately sparse, and Details' "Scan" button is the discoverable entry). */
+void wh_hunt_view_set_fingerprint_available(WhHuntView* hunt, bool available);
 
 /** Set the target's IP / hostname / device class (the header label is the first of
  * hostname, class, IP that is set; any may be ""). */

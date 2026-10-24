@@ -33,6 +33,7 @@ void wh_scene_hunt_on_enter(void* context) {
     s_elicit_on = false;
     wh_hunt_view_set_elicit_on(app->hunt, false);
     wh_hunt_view_set_elicit_available(app->hunt, wh_scene_hunt_elicit_avail(app));
+    wh_hunt_view_set_fingerprint_available(app->hunt, wh_fingerprint_avail(app));
     s_resolve_ticks = 0;
     wh_scene_hunt_maybe_resolve(app); /* kick a lookup right away if IP unknown */
 
@@ -65,6 +66,7 @@ bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
          * already stopped eliciting, so clear our indicator too. */
         const bool avail = wh_scene_hunt_elicit_avail(app);
         wh_hunt_view_set_elicit_available(app->hunt, avail);
+        wh_hunt_view_set_fingerprint_available(app->hunt, wh_fingerprint_avail(app));
         if(!avail && s_elicit_on) {
             s_elicit_on = false;
             wh_hunt_view_set_elicit_on(app->hunt, false);
@@ -93,6 +95,15 @@ bool wh_scene_hunt_on_event(void* context, SceneManagerEvent event) {
             wh_send(app, "ELICIT,STOP");
         }
         wh_hunt_view_set_elicit_on(app->hunt, s_elicit_on);
+        return true;
+    }
+
+    if(event.type == SceneManagerEventTypeCustom && event.event == WhEventHuntFingerprint) {
+        if(!wh_fingerprint_avail(app)) return true;
+        /* The fingerprint scene's on_enter sends FP; entering it first runs this
+         * scene's on_exit (STOP), which keeps the AP link alive -- so the socket
+         * scan still works -- and Back re-enters the hunt (re-sending HUNT). */
+        scene_manager_next_scene(app->scene_manager, WhSceneFingerprint);
         return true;
     }
 
