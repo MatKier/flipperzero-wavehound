@@ -1,6 +1,8 @@
 # Build the Flipper app (with oui.db) and the board firmware.
 #
-# - push to any branch: build + package as a CI check. Runs can restore caches
+# - push to any branch: build + package as a CI check, skipped when the push
+#   only touches files the build doesn't read (docs, screenshots, catalog
+#   metadata, the other workflow). Runs can restore caches
 #   saved on their own branch or on the default branch (main); tag runs only the
 #   default branch's, so the large toolchain caches (ufbt, PlatformIO) are saved
 #   there only.
@@ -11,7 +13,19 @@ name: Build and release
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
+    tags: ["v*"]   # path filters don't apply to tag pushes: releases always build
+    # Later patterns win. Markdown the packaging reads (THIRD_PARTY_NOTICES.md,
+    # catalog/changelog.md) still triggers; so does LICENSE / licenses/.
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "!flipper_app/catalog/**"
+      - "!.github/dependabot.yml"
+      - "!.github/workflows/toolchain-check.yml"
+      - "!.gitignore"
+      - "THIRD_PARTY_NOTICES.md"
+      - "flipper_app/catalog/changelog.md"
   workflow_dispatch:
 
 permissions:
@@ -21,7 +35,8 @@ concurrency:
   group: build-${{ github.ref }}
   # Feature branches auto-cancel a stale in-progress build (newest push wins).
   # The default branch and tags never cancel: same-ref runs serialize instead,
-  # so a release's back-to-back main pushes (merge + commit_sha) both finish.
+  # so back-to-back main pushes both finish (a release's commit_sha follow-up
+  # only touches the catalog manifest, so it doesn't build at all).
   cancel-in-progress: ${{ github.ref_type != 'tag' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
 env:

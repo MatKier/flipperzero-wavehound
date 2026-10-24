@@ -41,6 +41,6 @@ docs/BUILDING.md          building and flashing from source (PlatformIO, ufbt)
 docs/VENDOR_DB.md         oui.db format, lookup order, refresh, license
 docs/LAYOUT.md            this file
 docs/SCREENSHOTS.md       screenshot gallery; docs/screenshots/ holds the censored shots
-.github/workflows/release.yml  build app + firmware on every branch push (CI); on a v* tag also publish the release
+.github/workflows/release.yml  build app + firmware on branch pushes that touch build inputs (CI); on a v* tag also publish the release
 .github/workflows/toolchain-check.yml  weekly: open an issue when a newer Flipper SDK or espressif32 platform is released
 ```

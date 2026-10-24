@@ -108,7 +108,10 @@ If the version bump lands as a direct commit on `main` rather than via a PR
 Pushing the tag runs `.github/workflows/release.yml`, which builds both sides
 and publishes the GitHub release (it fails if the tag isn't `v<fap_version>`
 or `changelog.md` has no `## v<fap_version>` entry; the entry becomes the
-release notes). The same workflow builds every branch push as a CI check.
+release notes). The same workflow builds every branch push as a CI check,
+except pushes that only touch docs, Markdown, catalog metadata (bar
+`changelog.md`) or the other workflow (`paths` filter in `release.yml`; keep it
+in step if the build starts reading a new file there). Tag pushes always run.
 The toolchain caches (ufbt and PlatformIO, keyed separately) are saved on
 `main` only, because tag runs can only restore caches saved on `main`. CI
 doesn't download `manuf`; it builds and ships the committed `tools/manuf.gz` /
