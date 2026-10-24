@@ -39,10 +39,11 @@ flipper_app/
   wavehound_i.h           WavehoundApp struct, WhTarget/WhSavedMac, view & event enums
   wh_uart.c               USART worker, line splitting, keep-alive ping
   wh_store.c              saved MACs: load/add/update/delete on SD
+  wh_ap_store.c           saved AP passwords: load/add/delete on SD (aps.txt)
   wh_settings.c           app settings: load/save on SD (settings.txt)
   wh_oui.c                vendor lookup from SD oui.db (binary search, no RAM load)
   scenes/                 one file per screen (scene-manager pattern)
-  views/                  custom views: hunt, spectrum
+  views/                  custom views: hunt (+ Geiger click thread), spectrum
   assets/oui.db           bundled vendor db, committed (generated from tools/manuf.gz)
 tools/gen_oui.py          build oui.db from Wireshark's manuf
 tools/manuf.gz            the Wireshark manuf oui.db is built from (committed, GPL-2.0+)
@@ -164,13 +165,11 @@ and `screenshots/`.
 - The manifest's `changelog` and `screenshots` paths must point at files that
   exist.
 - `commit_sha` must point at the commit on `main` that actually carries the
-  submitted code — i.e. the **squash-merge commit** of the release PR (the same
-  commit the `v<version>` tag is on). That SHA doesn't exist until the PR merges,
-  so the normal flow is: merge the PR, then make a small follow-up commit on
-  `main` that sets `commit_sha` to the merge commit (message like
-  `catalog: set manifest commit_sha to the merged commit`). That follow-up commit
-  is **not** itself the referenced/tagged commit. See `v1.2` → `046038f` and
-  `v1.3` → `a2a3f32` for the pattern.
+  submitted code: the **squash-merge commit** of the release PR, the same commit
+  the `v<version>` tag is on (flow in [Tagging a release](#tagging-a-release)).
+  The follow-up commit that sets it (message like
+  `catalog: set manifest commit_sha to the merged commit`) is **not** itself the
+  referenced/tagged commit. See `v1.2` → `046038f` and `v1.3` → `a2a3f32`.
 
 Path gotcha: the catalog bundler resolves the manifest's `@file` and screenshot
 paths relative to `sourcecode.subdir` (`flipper_app`), **not** to the manifest's
