@@ -99,12 +99,16 @@ mDNS/Bonjour and UPnP/SSDP query first, which is how a TV or printer becomes
 needs board firmware v16).
 
 Discovery stays radio-first either way: the client list is built only from
-devices actually heard over the air, keyed by MAC. Logging in adds a background
-ARP sweep that fills in each heard device's IP and hostname — it only
+devices actually heard over the air, keyed by MAC. Not logged in, that is all
+there is: MACs, signal strength and the vendor guess. Logging in adds a
+background sweep — ARP for each heard device's IP, then a few multicast
+mDNS/SSDP queries and reverse-DNS/NBNS lookups for its name and type — that only
 *annotates* those rows, never adding a host you haven't heard, so anything known
 only from the router's relayed reply (including wired devices on the same
 network) is deliberately left off. A client still has to transmit to appear and
 to be hunted; the elicitation ping below is what coaxes a quiet one into doing so.
+The sweep's timing and name precedence are laid out in
+[docs/DISCOVERY.md](docs/DISCOVERY.md).
 
 On the hunt screen, **Down** toggles the **elicitation ping**: a rate-limited
 unicast request (ARP, plus an ICMP echo) sent to the one target you are hunting,
@@ -152,6 +156,7 @@ tools/package_release.py  collect a release (fap, board bins, notices)
 build_app.py      build the app (ufbt); --update-db refreshes the vendor database first
 licenses/         GPL-2.0 text for the Wireshark-derived vendor data
 docs/PROTOCOL.md  the UART protocol
+docs/DISCOVERY.md  logged-in host discovery: sweep passes, listen windows, name precedence
 .github/workflows/release.yml  CI build on every branch push; build + publish a release on a v* tag
 .github/workflows/toolchain-check.yml  weekly check for a newer Flipper SDK / espressif32 platform (opens an issue)
 ```

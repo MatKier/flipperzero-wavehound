@@ -51,6 +51,7 @@ build_app.py              run ufbt (--update-db: refresh oui.db + manuf.gz first
 .github/workflows/toolchain-check.yml  weekly: open an issue when a newer Flipper SDK or espressif32 platform is released
 THIRD_PARTY_NOTICES.md    licenses of what the release binaries and the repo's Wireshark data contain
 docs/PROTOCOL.md          the UART protocol (source of truth for the wire format)
+docs/DISCOVERY.md         logged-in host discovery flow (passes, listen windows, name precedence)
 ```
 
 ## Scene pattern (flipper_app)

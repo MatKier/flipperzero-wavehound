@@ -145,6 +145,9 @@ only displays them): `Chromecast`, `Sonos`, `Roku`, `Smart TV`, `AirPlay`,
 `HomeKit`, `Speaker`, `Printer`, `Media player`, `Apple device`, `NAS`, `Router`,
 `Computer`, `Web UI`.
 
+The timing of the sweep passes and listen windows is diagrammed in
+[DISCOVERY.md](DISCOVERY.md).
+
 Each trigger probes the subnet a few times with a short gap, not once: a device
 in power-save often misses its single ARP, so later passes re-probe only the
 addresses still missing (the ones already found are skipped) and give each
