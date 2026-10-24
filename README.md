@@ -2,6 +2,11 @@
 
 **WiFi fox hunting for the Flipper Zero WiFi dev board.**
 
+[![Build](https://github.com/MatKier/flipperzero-wavehound/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/MatKier/flipperzero-wavehound/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/MatKier/flipperzero-wavehound)](https://github.com/MatKier/flipperzero-wavehound/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/MatKier/flipperzero-wavehound)](LICENSE)
+![Good boy: yes](https://img.shields.io/badge/good%20boy-yes-ff69b4)
+
 Wavehound uses the Flipper and its ESP32-S2 WiFi dev board to locate a 2.4 GHz
 WiFi transmitter by its signal strength. Pick an access point or other device
 from a live scan, or type in a MAC, then walk around: the Flipper clicks faster,

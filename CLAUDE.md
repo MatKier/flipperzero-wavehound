@@ -6,8 +6,11 @@ user-facing overview and [docs/PROTOCOL.md](docs/PROTOCOL.md) for the wire forma
 ## What this is
 
 **Wavehound** is WiFi fox-hunting for the Flipper Zero WiFi dev board. It locates
-a 2.4 GHz transmitter by its per-frame RSSI. It is **receive-only** (promiscuous
-RX, never transmits).
+a 2.4 GHz transmitter by its per-frame RSSI. It is **receive-only by default**
+(promiscuous RX). The exception is the opt-in AP login and what runs over it:
+host/name lookups (ARP, mDNS/SSDP), the elicitation ping and fingerprinting
+(port scan + HTTP banner) all transmit. Keep any new transmitting feature
+opt-in and say so in the README.
 
 Two independent programs talk over UART:
 
