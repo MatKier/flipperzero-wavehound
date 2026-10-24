@@ -99,6 +99,7 @@ typedef struct {
     bool pin_channel; /* user chose the channel: board must not hop away */
     char ip[16];   /* IPv4 on the associated subnet (from IP,... lines), else empty */
     char host[33]; /* best-effort hostname, else empty */
+    char dtype[16]; /* device class from mDNS/SSDP ("Chromecast", "Printer"), else empty */
 } WhTarget;
 
 /** An IP/host learned before its device row existed (ARP replies can beat the
@@ -108,6 +109,7 @@ typedef struct {
     char mac[18];
     char ip[16];
     char host[33];
+    char dtype[16];
 } WhPendingIp;
 
 /** A saved AP credential, persisted to the SD card (plaintext, like saved MACs). */

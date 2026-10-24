@@ -29,17 +29,32 @@
 #define ND_SWEEP_PASSES 3            /* probe the subnet this many times per trigger */
 #define ND_PASS_GAP_MS 1500          /* pause between passes so a sleeping host can wake */
 #define ND_NAME_MAX_TRIES 3          /* reverse-DNS/NBNS attempts per host before giving up */
+#define ND_TYPE_MAX 16               /* device-class label buffer incl. NUL */
+#define ND_RANK_NONE 0xff            /* no mDNS/SSDP answer yet (ranks are k_labels indices) */
+#define ND_PEND_MAX 8                /* mDNS/SSDP answers held for an IP not in the table yet */
+#define ND_QUERY_DRAIN_MS 1000       /* listen for mDNS/SSDP answers after sending the queries */
+#define ND_QUERY_SENDS 2             /* send the queries after this many passes (power-save misses) */
+#define ND_RX_MAX 1500               /* one mDNS/SSDP datagram (a UDP truncate would lose records) */
 
 typedef struct {
     uint8_t mac[6];
     uint32_t ip;         /* network byte order */
     bool emitted;        /* IP line sent */
     uint8_t name_tries;  /* reverse-DNS/NBNS attempts so far (capped at ND_NAME_MAX_TRIES) */
+    uint8_t nrank;       /* rank of the mDNS answer behind host[], ND_RANK_NONE if not from mDNS */
+    uint8_t trank;       /* rank of the mDNS/SSDP answer behind dtype[], ND_RANK_NONE if none */
     char host[ND_HOST_MAX];
+    char dtype[ND_TYPE_MAX]; /* device class ("Chromecast", "Printer", ...) or empty */
 } nd_host_t;
 
 static nd_host_t s_hosts[ND_MAX_HOSTS];
 static int s_host_count;
+
+/* mDNS/SSDP answers are matched to a row by source IP. One can arrive before the
+ * ARP sweep has mapped that IP to a MAC, so park it here (only ip/host/dtype/
+ * nrank/trank are used) and let nd_add_locked fold it in when the host appears. */
+static nd_host_t s_pend[ND_PEND_MAX];
+static int s_pend_count, s_pend_next;
 static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_snapshot_done;
 static TaskHandle_t s_task;
@@ -79,6 +94,27 @@ static volatile uint32_t s_arp_target; /* IP handed to the tcpip-thread ARP send
 
 /* --- shared host table (hold s_lock) --- */
 
+/* Reset a row's names for a (new) address and fold in any answer already parked
+ * for that IP. */
+static void nd_reset_names_locked(nd_host_t *h)
+{
+    h->name_tries = 0;
+    h->nrank = ND_RANK_NONE;
+    h->trank = ND_RANK_NONE;
+    h->host[0] = '\0';
+    h->dtype[0] = '\0';
+    for (int i = 0; i < s_pend_count; i++) {
+        if (s_pend[i].ip == h->ip) {
+            h->nrank = s_pend[i].nrank;
+            h->trank = s_pend[i].trank;
+            memcpy(h->host, s_pend[i].host, sizeof(h->host));
+            memcpy(h->dtype, s_pend[i].dtype, sizeof(h->dtype));
+            s_pend[i] = s_pend[--s_pend_count];
+            break;
+        }
+    }
+}
+
 static void nd_add_locked(const uint8_t mac[6], uint32_t ip)
 {
     for (int i = 0; i < s_host_count; i++) {
@@ -86,8 +122,7 @@ static void nd_add_locked(const uint8_t mac[6], uint32_t ip)
             if (s_hosts[i].ip != ip) {
                 s_hosts[i].ip = ip; /* address changed: re-announce and re-resolve */
                 s_hosts[i].emitted = false;
-                s_hosts[i].name_tries = 0;
-                s_hosts[i].host[0] = '\0';
+                nd_reset_names_locked(&s_hosts[i]);
             }
             return;
         }
@@ -99,6 +134,7 @@ static void nd_add_locked(const uint8_t mac[6], uint32_t ip)
     memset(h, 0, sizeof(*h));
     memcpy(h->mac, mac, 6);
     h->ip = ip;
+    nd_reset_names_locked(h);
 }
 
 /* --- tcpip-thread callbacks (lwip core is only safe here) --- */
@@ -389,16 +425,23 @@ static bool nbns_name(uint32_t ip_net, char *out, size_t out_sz)
 
 /* --- sweep orchestration (discovery task) --- */
 
-static void emit_ip(const uint8_t mac[6], uint32_t ip_net, const char *name)
+static void emit_ip(const uint8_t mac[6], uint32_t ip_net, const char *name, const char *dtype)
 {
     ip4_addr_t ipa;
     ip4_addr_set_u32(&ipa, ip_net);
     char ipstr[16];
     snprintf(ipstr, sizeof(ipstr), "%u.%u.%u.%u", (unsigned)ip4_addr1(&ipa),
              (unsigned)ip4_addr2(&ipa), (unsigned)ip4_addr3(&ipa), (unsigned)ip4_addr4(&ipa));
+    char hex[2 * (ND_HOST_MAX - 1) + 1] = "";
     if (name && name[0]) {
-        char hex[2 * (ND_HOST_MAX - 1) + 1];
         proto_hex_encode(name, strlen(name), hex, sizeof(hex));
+    }
+    /* IP,<mac>,<ip>[,<host_hex>[,<type>]]: the type needs the host slot, left
+     * empty when only a type is known. */
+    if (dtype && dtype[0]) {
+        proto_sendf("IP,%02x:%02x:%02x:%02x:%02x:%02x,%s,%s,%s", mac[0], mac[1], mac[2], mac[3],
+                    mac[4], mac[5], ipstr, hex, dtype);
+    } else if (hex[0]) {
         proto_sendf("IP,%02x:%02x:%02x:%02x:%02x:%02x,%s,%s", mac[0], mac[1], mac[2], mac[3], mac[4],
                     mac[5], ipstr, hex);
     } else {
@@ -407,7 +450,7 @@ static void emit_ip(const uint8_t mac[6], uint32_t ip_net, const char *name)
     }
 }
 
-/* Announce every host found but not yet reported (IP only). */
+/* Announce every host found but not yet reported (with its name/type if known). */
 static void emit_pending_ips(void)
 {
     for (;;) {
@@ -426,9 +469,9 @@ static void emit_pending_ips(void)
         if (!found) {
             break;
         }
-        /* Include the name if we already resolved it, so re-announcing (e.g. for
-         * a freshly reopened client list) doesn't downgrade a named row to IP. */
-        emit_ip(h.mac, h.ip, h.host[0] ? h.host : NULL);
+        /* Include the name and type if we already resolved them, so re-announcing
+         * (e.g. for a freshly reopened client list) doesn't downgrade a row. */
+        emit_ip(h.mac, h.ip, h.host[0] ? h.host : NULL, h.dtype);
     }
 }
 
@@ -462,16 +505,447 @@ static void resolve_pending_names(void)
             nbns_name(h.ip, name, sizeof(name));
         }
         if (name[0]) {
+            char dtype[ND_TYPE_MAX] = "";
             xSemaphoreTake(s_lock, portMAX_DELAY);
             for (int i = 0; i < s_host_count; i++) {
                 if (memcmp(s_hosts[i].mac, h.mac, 6) == 0) {
                     snprintf(s_hosts[i].host, sizeof(s_hosts[i].host), "%s", name);
+                    memcpy(dtype, s_hosts[i].dtype, sizeof(dtype));
                     break;
                 }
             }
             xSemaphoreGive(s_lock);
-            emit_ip(h.mac, h.ip, name);
+            emit_ip(h.mac, h.ip, name, dtype);
         }
+    }
+}
+
+/* --- mDNS / SSDP name & device-type discovery (discovery task) ---
+ *
+ * One multicast question reaches every host at once, and consumer gear (phones,
+ * TVs, speakers, printers, cameras) answers these where reverse DNS / NBNS give
+ * nothing. Queries go out from ephemeral ports, so no group join or port-5353
+ * bind is needed: mDNS responders reply by legacy unicast straight back to us
+ * (and the QU bit asks for it), SSDP replies are unicast anyway. Answers are
+ * matched to a host row by source IP. */
+
+/* Device-class labels; the enum value is the rank (a lower rank is more specific
+ * and wins, so a Chromecast that also advertises _http stays "Chromecast"). */
+enum {
+    L_CAST, L_SONOS, L_ROKU, L_TV, L_AIRPLAY, L_HOMEKIT, L_SPEAKER,
+    L_PRINTER, L_MEDIA, L_APPLE, L_ROUTER, L_NAS, L_COMPUTER, L_WEB,
+};
+static const char *const k_labels[] = {
+    "Chromecast", "Sonos", "Roku", "Smart TV", "AirPlay", "HomeKit", "Speaker",
+    "Printer", "Media player", "Apple device", "Router", "NAS", "Computer", "Web UI",
+};
+
+/* DNS-SD service types asked for in one packet; each answers with its instance
+ * name (the PTR target). */
+static const struct {
+    const char *svc;
+    uint8_t label;
+} k_mdns[] = {
+    {"_googlecast._tcp", L_CAST},       {"_sonos._tcp", L_SONOS},
+    {"_airplay._tcp", L_AIRPLAY},       {"_raop._tcp", L_AIRPLAY},
+    {"_hap._tcp", L_HOMEKIT},           {"_spotify-connect._tcp", L_SPEAKER},
+    {"_ipp._tcp", L_PRINTER},           {"_pdl-datastream._tcp", L_PRINTER},
+    {"_printer._tcp", L_PRINTER},       {"_companion-link._tcp", L_APPLE},
+    {"_smb._tcp", L_NAS},               {"_afpovertcp._tcp", L_NAS},
+    {"_ssh._tcp", L_COMPUTER},          {"_http._tcp", L_WEB},
+};
+#define MDNS_SVC_COUNT (sizeof(k_mdns) / sizeof(k_mdns[0]))
+
+/* SSDP: targeted searches (not ssdp:all, which makes every device answer once per
+ * service and would overflow the small UDP receive queue). A reply is classified
+ * by a case-insensitive substring of its ST/USN/SERVER headers. */
+static const char *const k_ssdp_st[] = {
+    "urn:dial-multiscreen-org:service:dial:1",
+    "urn:schemas-upnp-org:device:MediaRenderer:1",
+    "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+};
+static const struct {
+    const char *needle;
+    uint8_t label;
+} k_ssdp[] = {
+    {"roku", L_ROKU},
+    {"sonos", L_SONOS},
+    {"dial-multiscreen", L_TV},
+    {"MediaRenderer", L_MEDIA},
+    {"InternetGatewayDevice", L_ROUTER},
+};
+
+static int s_mdns_sock = -1, s_ssdp_sock = -1;
+/* Shared by the discovery task only (static: the 4 KB task stack is tight). */
+static uint8_t s_rx[ND_RX_MAX + 1];
+static uint8_t s_tx[640];
+
+/* Fold one answer (name may be empty, as for SSDP) into the row for `ip`, or park
+ * it in s_pend if no row has that IP yet. A lower rank replaces a higher one. */
+static void nd_apply_answer(uint32_t ip, const char *name, uint8_t rank)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    nd_host_t *h = NULL;
+    bool parked = false;
+    for (int i = 0; i < s_host_count && !h; i++) {
+        if (s_hosts[i].ip == ip) {
+            h = &s_hosts[i];
+        }
+    }
+    for (int i = 0; i < s_pend_count && !h; i++) {
+        if (s_pend[i].ip == ip) {
+            h = &s_pend[i];
+            parked = true;
+        }
+    }
+    if (!h) {
+        const int slot = s_pend_count < ND_PEND_MAX ? s_pend_count++ : s_pend_next++ % ND_PEND_MAX;
+        h = &s_pend[slot];
+        memset(h, 0, sizeof(*h));
+        h->ip = ip;
+        h->nrank = ND_RANK_NONE;
+        h->trank = ND_RANK_NONE;
+        parked = true;
+    }
+    bool changed = false;
+    if (rank < h->trank) {
+        snprintf(h->dtype, sizeof(h->dtype), "%s", k_labels[rank]);
+        h->trank = rank;
+        changed = true;
+    }
+    if (name[0] && rank < h->nrank) {
+        snprintf(h->host, sizeof(h->host), "%s", name);
+        h->nrank = rank;
+        changed = true;
+    }
+    if (changed && !parked) {
+        h->emitted = false; /* the caller's emit_pending_ips re-sends the row */
+    }
+    xSemaphoreGive(s_lock);
+}
+
+/* Copy `n` bytes of a device-supplied name into `out`: control bytes are dropped
+ * and the typographic apostrophe Apple puts in default names ("Max\xe2\x80\x99s
+ * iPhone", U+2019) becomes a plain one, which the Flipper font can draw. */
+static void nd_copy_name(const uint8_t *src, int n, char *out, size_t out_sz)
+{
+    size_t o = 0;
+    for (int i = 0; i < n && o + 1 < out_sz; i++) {
+        if (src[i] == 0xe2 && i + 2 < n && src[i + 1] == 0x80 &&
+            (src[i + 2] == 0x98 || src[i + 2] == 0x99)) {
+            out[o++] = '\'';
+            i += 2;
+        } else if (src[i] >= 0x20) {
+            out[o++] = (char)src[i];
+        }
+    }
+    out[o] = '\0';
+}
+
+/* The first label of the (possibly compressed) name at `off`, verbatim: an
+ * instance name may itself contain dots, which dns_read_name would conflate with
+ * label separators. Control bytes are dropped. */
+static bool dns_first_label(const uint8_t *pkt, int len, int off, char *out, size_t out_sz)
+{
+    for (int guard = 0; off < len && guard < 16; guard++) {
+        const uint8_t c = pkt[off];
+        if ((c & 0xc0) == 0xc0) {
+            if (off + 1 >= len) {
+                return false;
+            }
+            off = ((c & 0x3f) << 8) | pkt[off + 1];
+            continue;
+        }
+        if (c == 0 || (c & 0xc0) || off + 1 + c > len) {
+            return false;
+        }
+        nd_copy_name(pkt + off + 1, c, out, out_sz);
+        return out[0] != '\0';
+    }
+    return false;
+}
+
+/* The value of the "key=value" string in a TXT rdata block, if present. */
+static void txt_find(const uint8_t *t, int len, const char *key, char *out, size_t out_sz)
+{
+    const int kl = (int)strlen(key);
+    for (int i = 0; i < len;) {
+        const int l = t[i++];
+        if (i + l > len) {
+            break;
+        }
+        if (l > kl && memcmp(t + i, key, kl) == 0) {
+            nd_copy_name(t + i + kl, l - kl, out, out_sz);
+            return;
+        }
+        i += l;
+    }
+}
+
+static uint8_t mdns_rank(const char *owner)
+{
+    for (size_t i = 0; i < MDNS_SVC_COUNT; i++) {
+        const size_t l = strlen(k_mdns[i].svc);
+        if (strncmp(owner, k_mdns[i].svc, l) == 0 && (owner[l] == '.' || owner[l] == '\0')) {
+            return k_mdns[i].label;
+        }
+    }
+    return ND_RANK_NONE;
+}
+
+/* A DNS response (mDNS is plain DNS wire format): walk every record, take the
+ * best-ranked service's PTR instance name, and prefer a TXT friendly name
+ * ("fn=", set by Chromecast) over it. */
+static void mdns_handle(const uint8_t *p, int len, uint32_t src)
+{
+    if (len < 12 || !(p[2] & 0x80)) {
+        return; /* not a response */
+    }
+    const int qd = (p[4] << 8) | p[5];
+    int records = ((p[6] << 8) | p[7]) + ((p[8] << 8) | p[9]) + ((p[10] << 8) | p[11]);
+    char owner[48];
+    int off = 12;
+    for (int i = 0; i < qd; i++) { /* a legacy-unicast reply echoes our questions */
+        const int used = dns_read_name(p, len, off, owner, sizeof(owner));
+        if (used < 0) {
+            return;
+        }
+        off += used + 4; /* + QTYPE, QCLASS */
+    }
+    uint8_t best = ND_RANK_NONE;
+    char inst[ND_HOST_MAX] = "", fn[ND_HOST_MAX] = "";
+    for (; records > 0 && off < len; records--) {
+        const int used = dns_read_name(p, len, off, owner, sizeof(owner));
+        if (used < 0 || off + used + 10 > len) {
+            break;
+        }
+        const int type = (p[off + used] << 8) | p[off + used + 1];
+        const int rdlen = (p[off + used + 8] << 8) | p[off + used + 9];
+        const int rd = off + used + 10;
+        if (rd + rdlen > len) {
+            break;
+        }
+        if (type == 12) { /* PTR: service type -> instance */
+            const uint8_t r = mdns_rank(owner);
+            char tmp[ND_HOST_MAX];
+            if (r < best && dns_first_label(p, len, rd, tmp, sizeof(tmp))) {
+                best = r;
+                memcpy(inst, tmp, sizeof(inst));
+            }
+        } else if (type == 16) { /* TXT */
+            txt_find(p + rd, rdlen, "fn=", fn, sizeof(fn));
+        }
+        off = rd + rdlen;
+    }
+    if (best == ND_RANK_NONE) {
+        return;
+    }
+    char *name = fn[0] ? fn : inst;
+    if (strlen(name) > 13 && name[12] == '@') { /* AirPlay (_raop): "AABBCCDDEEFF@Name" */
+        bool hex = true;
+        for (int i = 0; i < 12; i++) {
+            hex = hex && ((name[i] >= '0' && name[i] <= '9') || (name[i] >= 'A' && name[i] <= 'F') ||
+                          (name[i] >= 'a' && name[i] <= 'f'));
+        }
+        if (hex) {
+            name += 13;
+        }
+    }
+    nd_apply_answer(src, name, best);
+}
+
+static bool ci_contains(const char *hay, const char *needle)
+{
+    const size_t nl = strlen(needle);
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < nl && hay[i] && (hay[i] | 0x20) == (needle[i] | 0x20)) {
+            i++;
+        }
+        if (i == nl) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* An SSDP "HTTP/1.1 200 OK" reply: classify it by its headers. It names no
+ * friendly name (that needs the device-description XML), only a type. */
+static void ssdp_handle(const char *msg, uint32_t src)
+{
+    if (strncmp(msg, "HTTP/1.1 200", 12) != 0) {
+        return;
+    }
+    uint8_t best = ND_RANK_NONE;
+    for (size_t i = 0; i < sizeof(k_ssdp) / sizeof(k_ssdp[0]); i++) {
+        if (k_ssdp[i].label < best && ci_contains(msg, k_ssdp[i].needle)) {
+            best = k_ssdp[i].label;
+        }
+    }
+    if (best != ND_RANK_NONE) {
+        nd_apply_answer(src, "", best);
+    }
+}
+
+static int nd_udp_socket(uint8_t mcast_ttl)
+{
+    const int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0) {
+#ifdef IP_MULTICAST_TTL
+        setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &mcast_ttl, sizeof(mcast_ttl));
+#else
+        (void)mcast_ttl;
+#endif
+    }
+    return sock;
+}
+
+/* One mDNS packet carrying a PTR question per service type (QU bit set). */
+static int mdns_build_query(uint8_t *q, size_t cap)
+{
+    int n = 0;
+    q[n++] = 0x57; /* ID (echoed by a legacy-unicast responder, otherwise unused) */
+    q[n++] = 0x48;
+    q[n++] = 0x00; /* flags: standard query */
+    q[n++] = 0x00;
+    q[n++] = 0x00;
+    q[n++] = (uint8_t)MDNS_SVC_COUNT;
+    for (int i = 0; i < 6; i++) {
+        q[n++] = 0x00; /* AN/NS/AR counts */
+    }
+    for (size_t s = 0; s < MDNS_SVC_COUNT; s++) {
+        const char *svc = k_mdns[s].svc;
+        while (*svc) { /* "_name._tcp" labels, then "local" */
+            const char *dot = strchr(svc, '.');
+            const int l = dot ? (int)(dot - svc) : (int)strlen(svc);
+            if (n + 1 + l > (int)cap) {
+                return -1;
+            }
+            q[n++] = (uint8_t)l;
+            memcpy(q + n, svc, l);
+            n += l;
+            svc += l + (dot ? 1 : 0);
+        }
+        if (n + 6 + 5 > (int)cap) {
+            return -1;
+        }
+        q[n++] = 5;
+        memcpy(q + n, "local", 5);
+        n += 5;
+        q[n++] = 0x00; /* root */
+        q[n++] = 0x00;
+        q[n++] = 0x0c; /* QTYPE = PTR */
+        q[n++] = 0x80; /* QCLASS = IN, QU (unicast response wanted) */
+        q[n++] = 0x01;
+    }
+    return n;
+}
+
+/* Fire the mDNS question and the SSDP searches. The sockets stay open (they
+ * collect answers across the drain and the pass gaps) until nd_query_close. */
+static void nd_query_send(void)
+{
+    if (s_mdns_sock < 0) {
+        s_mdns_sock = nd_udp_socket(255);
+    }
+    if (s_ssdp_sock < 0) {
+        s_ssdp_sock = nd_udp_socket(2);
+    }
+    struct sockaddr_in dst = {0};
+    dst.sin_family = AF_INET;
+    if (s_mdns_sock >= 0) {
+        const int n = mdns_build_query(s_tx, sizeof(s_tx));
+        dst.sin_port = lwip_htons(5353);
+        dst.sin_addr.s_addr = lwip_htonl(0xe00000fbu); /* 224.0.0.251 */
+        if (n > 0) {
+            sendto(s_mdns_sock, s_tx, n, 0, (struct sockaddr *)&dst, sizeof(dst));
+        }
+    }
+    if (s_ssdp_sock >= 0) {
+        dst.sin_port = lwip_htons(1900);
+        dst.sin_addr.s_addr = lwip_htonl(0xeffffffau); /* 239.255.255.250 */
+        for (size_t i = 0; i < sizeof(k_ssdp_st) / sizeof(k_ssdp_st[0]); i++) {
+            const int n = snprintf((char *)s_tx, sizeof(s_tx),
+                                   "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
+                                   "MAN: \"ssdp:discover\"\r\nMX: 1\r\nST: %s\r\n\r\n",
+                                   k_ssdp_st[i]);
+            sendto(s_ssdp_sock, s_tx, n, 0, (struct sockaddr *)&dst, sizeof(dst));
+        }
+    }
+}
+
+static void nd_query_close(void)
+{
+    if (s_mdns_sock >= 0) {
+        close(s_mdns_sock);
+        s_mdns_sock = -1;
+    }
+    if (s_ssdp_sock >= 0) {
+        close(s_ssdp_sock);
+        s_ssdp_sock = -1;
+    }
+}
+
+static void nd_query_recv(int sock, bool is_mdns)
+{
+    struct sockaddr_in from;
+    socklen_t fl = sizeof(from);
+    const int n = recvfrom(sock, s_rx, ND_RX_MAX, 0, (struct sockaddr *)&from, &fl);
+    if (n <= 0) {
+        return;
+    }
+    if (is_mdns) {
+        mdns_handle(s_rx, n, from.sin_addr.s_addr);
+    } else {
+        s_rx[n] = '\0';
+        ssdp_handle((const char *)s_rx, from.sin_addr.s_addr);
+    }
+}
+
+/* Wait `ms`, consuming mDNS/SSDP answers as they arrive and announcing the rows
+ * they update. With no sockets open this is just a delay (it also stands in for
+ * the pause between sweep passes). */
+static void nd_query_drain(uint32_t ms)
+{
+    const TickType_t start = xTaskGetTickCount();
+    const TickType_t total = pdMS_TO_TICKS(ms);
+    for (;;) {
+        const TickType_t elapsed = xTaskGetTickCount() - start;
+        if (elapsed >= total || !s_connected) {
+            break;
+        }
+        if (s_mdns_sock < 0 && s_ssdp_sock < 0) {
+            vTaskDelay(total - elapsed);
+            break;
+        }
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        int maxfd = -1;
+        if (s_mdns_sock >= 0) {
+            FD_SET(s_mdns_sock, &rfds);
+            maxfd = s_mdns_sock;
+        }
+        if (s_ssdp_sock >= 0) {
+            FD_SET(s_ssdp_sock, &rfds);
+            maxfd = s_ssdp_sock > maxfd ? s_ssdp_sock : maxfd;
+        }
+        const uint32_t left_ms = (total - elapsed) * portTICK_PERIOD_MS;
+        struct timeval tv = {.tv_sec = left_ms / 1000, .tv_usec = (left_ms % 1000) * 1000};
+        const int r = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+        if (r < 0) {
+            vTaskDelay(pdMS_TO_TICKS(20)); /* don't spin on a socket error */
+            continue;
+        }
+        if (r == 0) {
+            continue; /* timed out: the time check above ends the loop */
+        }
+        if (s_mdns_sock >= 0 && FD_ISSET(s_mdns_sock, &rfds)) {
+            nd_query_recv(s_mdns_sock, true);
+        }
+        if (s_ssdp_sock >= 0 && FD_ISSET(s_ssdp_sock, &rfds)) {
+            nd_query_recv(s_ssdp_sock, false);
+        }
+        emit_pending_ips();
     }
 }
 
@@ -527,7 +1001,7 @@ static bool chunk_has_unknown(uint32_t lo, uint32_t hi)
 
 /* One pass over [first_h, last_h]: send a small batch, let it answer, read the
  * cache before the next batch evicts it, announcing IPs as they are learned.
- * Names (slow, best-effort) are attempted once at the end. */
+ * Names (slow, best-effort) are left to sweep_once, after the mDNS/SSDP queries. */
 static void sweep_pass(uint32_t first_h, uint32_t last_h)
 {
     for (uint32_t lo = first_h; lo <= last_h; lo += ND_SWEEP_CHUNK) {
@@ -551,7 +1025,6 @@ static void sweep_pass(uint32_t first_h, uint32_t last_h)
         }
         emit_pending_ips();
     }
-    resolve_pending_names();
 }
 
 static void sweep_once(void)
@@ -585,10 +1058,15 @@ static void sweep_once(void)
     /* Probe a few times: a device in power-save often misses its one ARP in a
      * pass, so re-probe after a gap. The first pass covers everything; later
      * passes skip the hosts already found and re-probe only what is still
-     * missing (and give still-unnamed hosts another resolve attempt). */
+     * missing (and give still-unnamed hosts another resolve attempt).
+     *
+     * The mDNS/SSDP queries go out after the first passes' ARP chunks, so most
+     * answering IPs are already in the table, and before the slow PTR/NBNS
+     * lookups, which then skip every host the multicast answers named. The gap
+     * between passes listens for stragglers instead of idling. */
     for (int pass = 0; pass < ND_SWEEP_PASSES && s_connected; pass++) {
         if (pass > 0) {
-            vTaskDelay(pdMS_TO_TICKS(ND_PASS_GAP_MS));
+            nd_query_drain(ND_PASS_GAP_MS);
             if (!s_connected) {
                 break;
             }
@@ -598,7 +1076,16 @@ static void sweep_once(void)
             s_skip_known = false;
         }
         sweep_pass(first_h, last_h);
+        if (!s_connected) {
+            break;
+        }
+        if (pass < ND_QUERY_SENDS) {
+            nd_query_send();
+            nd_query_drain(ND_QUERY_DRAIN_MS);
+        }
+        resolve_pending_names();
     }
+    nd_query_close();
     s_skip_known = false;
 }
 
@@ -751,6 +1238,7 @@ void net_discover_on_down(void)
     if (s_lock) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_host_count = 0;
+        s_pend_count = 0;
         xSemaphoreGive(s_lock);
     }
 }

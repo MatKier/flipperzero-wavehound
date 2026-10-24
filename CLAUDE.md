@@ -28,6 +28,7 @@ firmware/main/
   main.c      UART command parser (HUNT/DISCOVER/SPECTRUM/INFO/...)
   radio.c     discover / hunt / spectrum state machine + promiscuous RX callback
   info.c      board version / identity / health (INFO reply)
+  net_discover.c  ARP sweep + mDNS/SSDP/PTR/NBNS name & type discovery (IP lines), elicitation ping
   proto.c     UART line I/O            proto.h  has WH_FW_VERSION
   led.c       RGB LED heat indicator (LEDC PWM)
   Kconfig.projbuild  pins, baud, LED, max channel (menuconfig -> Wavehound)
@@ -51,6 +52,7 @@ build_app.py              run ufbt (--update-db: refresh oui.db + manuf.gz first
 .github/workflows/toolchain-check.yml  weekly: open an issue when a newer Flipper SDK or espressif32 platform is released
 THIRD_PARTY_NOTICES.md    licenses of what the release binaries and the repo's Wireshark data contain
 docs/PROTOCOL.md          the UART protocol (source of truth for the wire format)
+docs/DISCOVERY.md         logged-in host discovery flow (passes, listen windows, name precedence)
 ```
 
 ## Scene pattern (flipper_app)

@@ -22,13 +22,15 @@ void wh_scene_details_on_enter(void* context) {
     widget_reset(w);
 
     /* Identity line: an AP shows its SSID (its row can pick up the gateway IP,
-     * so IP must not win there); a station prefers its resolved host / IP when
-     * known, matching the client list and hunt header. */
+     * so IP must not win there); a station prefers its resolved host, then its
+     * device class, then IP, matching the client list and hunt header. */
     const char* title;
     if(t->is_ap) {
         title = t->name[0] ? t->name : "(hidden AP)";
     } else if(t->host[0]) {
         title = t->host;
+    } else if(t->dtype[0]) {
+        title = t->dtype;
     } else if(t->ip[0]) {
         title = t->ip;
     } else if(t->name[0]) {
@@ -45,9 +47,11 @@ void wh_scene_details_on_enter(void* context) {
     snprintf(line, sizeof(line), "Vendor: %s", vendor);
     widget_add_string_element(w, 0, 35, AlignLeft, AlignBottom, FontSecondary, line);
 
-    /* "<AP|Station>[ chN][ <security>][ <phy>] <rssi>dBm". Security and PHY are
-     * only known for access points whose beacon was parsed. */
-    size_t n = snprintf(line, sizeof(line), "%s", t->is_ap ? "AP" : "Station");
+    /* "<AP|Station|class>[ chN][ <security>][ <phy>] <rssi>dBm". A station whose
+     * class is known (mDNS/SSDP) shows it in place of "Station". Security and PHY
+     * are only known for access points whose beacon was parsed. */
+    size_t n = snprintf(
+        line, sizeof(line), "%s", t->is_ap ? "AP" : t->dtype[0] ? t->dtype : "Station");
     if(t->channel) n += snprintf(line + n, sizeof(line) - n, " ch%u", t->channel);
     if(t->security[0]) n += snprintf(line + n, sizeof(line) - n, " %s", t->security);
     if(t->phy[0]) n += snprintf(line + n, sizeof(line) - n, " %s", t->phy);

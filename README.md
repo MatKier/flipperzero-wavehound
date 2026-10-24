@@ -59,7 +59,7 @@ board, not about where the code can run.)
 | **Hunt devices** | First pick the scope: **All channels (hop)**, **Channel 1–13** (every device on that channel), or **Clients of nearby AP…**, which runs an AP scan so you can pick a network and then lists only the stations associated with it, on its channel. The list then fills live, with access points left out. You get the other transmitters: phones, laptops, smart plugs, cameras. `*` marks a randomized (privacy) MAC that may change over time. Pick one to open its details (vendor, type, signal), then hunt. If you fixed the channel, the hunt stays on it. |
 | **Enter MAC** | Type a MAC on the hex keypad (pre-filled with your last target), then pick the channel the same way: **Auto (hop until heard)**, a channel number, or a nearby AP's channel. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
 | **Device details** | After picking a scan result you get a details screen: SSID/name, MAC, **vendor** (resolved from the MAC's OUI), AP or station, channel, and signal. For access points it also shows the security (Open/WEP/WPA/WPA2/WPA3) and 802.11 mode (g/n/ac/ax), e.g. `AP ch6 WPA2 n -52dBm`. **Hunt** continues to the hunt; **Save** stores it as a favorite. Randomized MACs show `randomized` instead of a vendor. Vendor resolution needs the `oui.db` database; without it, other MACs show "Unknown" (see [Vendor database](#vendor-database)). (Security and 802.11 mode need board firmware v7.) |
-| **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout with the frame rate (frames/s) beside it, a COLD/COOL/WARM/HOT! label with a trend arrow for whether the signal is rising or falling as you move, a meter with peak and noise-floor markers, the noise floor value (`nf`), and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels; once a heard target goes quiet, a `quiet Ns` timer counts the silence, and after 8 s (configurable as **Re-search**) it hops again to re-find the target. Press **Right** to save the current target as a named favorite. When you are logged in to the target's access point and its IP is known, the header shows the device's IP (or resolved hostname) and **Down** toggles an elicitation ping to coax frames out of a silent device (see [Hunting silent devices](#hunting-silent-devices-optional)). An optional haptic buzz, a kept-on backlight and the meter's Near/Normal/Far range are all configurable under **Settings**. (The noise floor needs board firmware v6.) |
+| **Hunt screen** | The board parks on the target's channel and reports the signal strength of every frame that MAC sends (beacons, data, probes) every 100 ms. The screen shows a big dBm readout with the frame rate (frames/s) beside it, a COLD/COOL/WARM/HOT! label with a trend arrow for whether the signal is rising or falling as you move, a meter with peak and noise-floor markers, the noise floor value (`nf`), and a 12-second signal graph. Geiger clicks play through the speaker, faster as the signal gets stronger. `?ch` in the corner means the board is still searching channels; once a heard target goes quiet, a `quiet Ns` timer counts the silence, and after 8 s (configurable as **Re-search**) it hops again to re-find the target. Press **Right** to save the current target as a named favorite. When you are logged in to the target's access point and its IP is known, the header shows the device's resolved hostname, its type (e.g. Chromecast, Printer) or its IP and **Down** toggles an elicitation ping to coax frames out of a silent device (see [Hunting silent devices](#hunting-silent-devices-optional)). An optional haptic buzz, a kept-on backlight and the meter's Near/Normal/Far range are all configurable under **Settings**. (The noise floor needs board firmware v6.) |
 | **Saved MACs** | Favorites you saved from the hunt screen, kept on the SD card (`/ext/apps_data/wavehound/saved.txt`). Pick one for **Hunt / Edit / Delete**. Hunt opens the channel picker with the saved channel pre-selected, so you can accept it, choose another, or switch to Auto. Edit fixes the name, MAC or channel (each field pre-filled). Delete removes it. Saving a randomized (`*`) MAC is of little use since it rotates. |
 | **Saved APs** | Access-point passwords you chose to save during login (see [Hunting silent devices](#hunting-silent-devices-optional)), kept on the SD card (`/ext/apps_data/wavehound/aps.txt`). Pick one to **Edit password** or **Delete**. Credentials are stored in plaintext, exactly like saved MACs — the Flipper SD card is not encrypted, so treat it accordingly. |
 | **Channel spectrum** | The board sweeps channels 1–13 (120 ms dwell each) in promiscuous mode. The Flipper draws one bar per channel with peak hold, a sweep cursor, the busiest channel, and the number of distinct transmitters heard per sweep. You can switch the metric between packets, max dBm and bytes. |
@@ -93,15 +93,24 @@ offered a login before its client list is shown:
 
 After a successful join you can save the password to **Saved APs** for next
 time. The client list and the hunt screen then show each device's **IP** and,
-when it can be resolved, a **hostname** (best-effort reverse-DNS, then NBNS).
+when it can be resolved, a **hostname** and device **type** (best-effort: an
+mDNS/Bonjour and UPnP/SSDP query first, which is how a TV or printer gets a
+name like "Living Room TV" and a type like *Chromecast*, then reverse-DNS and
+NBNS for the rest; the type needs board firmware v16, and the list and hunt
+header show it only when the device has no name, while the details screen shows
+both).
 
 Discovery stays radio-first either way: the client list is built only from
-devices actually heard over the air, keyed by MAC. Logging in adds a background
-ARP sweep that fills in each heard device's IP and hostname — it only
+devices actually heard over the air, keyed by MAC. Not logged in, that is all
+there is: MACs, signal strength and the vendor guess. Logging in adds a
+background sweep — ARP for each heard device's IP, then a few multicast
+mDNS/SSDP queries and reverse-DNS/NBNS lookups for its name and type — that only
 *annotates* those rows, never adding a host you haven't heard, so anything known
 only from the router's relayed reply (including wired devices on the same
 network) is deliberately left off. A client still has to transmit to appear and
 to be hunted; the elicitation ping below is what coaxes a quiet one into doing so.
+The sweep's timing and name precedence are laid out in
+[docs/DISCOVERY.md](docs/DISCOVERY.md).
 
 On the hunt screen, **Down** toggles the **elicitation ping**: a rate-limited
 unicast request (ARP, plus an ICMP echo) sent to the one target you are hunting,
@@ -126,6 +135,7 @@ firmware/     ESP-IDF project for the ESP32-S2 on the WiFi dev board
   main/main.c     command parser
   main/radio.c    discover / hunt / spectrum state machine + promiscuous callback
   main/info.c     board version / identity / health report (INFO)
+  main/net_discover.c  ARP sweep + mDNS/SSDP/PTR/NBNS name & type discovery, elicitation ping
   main/proto.c    UART line I/O
   main/led.c      RGB LED (LEDC PWM)
 flipper_app/  Flipper external app (uFBT)
@@ -149,6 +159,7 @@ tools/package_release.py  collect a release (fap, board bins, notices)
 build_app.py      build the app (ufbt); --update-db refreshes the vendor database first
 licenses/         GPL-2.0 text for the Wireshark-derived vendor data
 docs/PROTOCOL.md  the UART protocol
+docs/DISCOVERY.md  logged-in host discovery: sweep passes, listen windows, name precedence
 .github/workflows/release.yml  CI build on every branch push; build + publish a release on a v* tag
 .github/workflows/toolchain-check.yml  weekly check for a newer Flipper SDK / espressif32 platform (opens an issue)
 ```

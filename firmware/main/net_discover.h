@@ -8,8 +8,9 @@
 /*
  * Local-network host discovery: once associated, sweep the subnet with ARP to
  * learn each host's IPv4 (matched to the MACs the hunt/discover scans report),
- * and make a best-effort attempt at a hostname (reverse DNS, then NBNS). Results
- * stream to the Flipper as IP,<mac>,<ip>[,<host_hex>] lines. All lwip calls run
+ * and make a best-effort attempt at a name: an mDNS/SSDP multicast query (which
+ * also yields a device type) and, for hosts that stay unnamed, reverse DNS then
+ * NBNS. Results stream to the Flipper as IP,<mac>,<ip>[,<host_hex>[,<type>]] lines. All lwip calls run
  * in the tcpip thread (this build has core-locking off); the slow socket
  * resolution runs in a dedicated low-priority task so the radio loop is never
  * blocked.

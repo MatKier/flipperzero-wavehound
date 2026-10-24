@@ -29,7 +29,7 @@ void wh_scene_hunt_on_enter(void* context) {
     const WhTarget* t = &app->target;
 
     wh_hunt_view_set_target(app->hunt, t->name[0] ? t->name : t->mac, t->channel);
-    wh_hunt_view_set_ip(app->hunt, t->ip, t->host);
+    wh_hunt_view_set_ip(app->hunt, t->ip, t->host, t->dtype);
     s_elicit_on = false;
     wh_hunt_view_set_elicit_on(app->hunt, false);
     wh_hunt_view_set_elicit_available(app->hunt, wh_scene_hunt_elicit_avail(app));

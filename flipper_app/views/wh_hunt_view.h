@@ -22,8 +22,13 @@ void wh_hunt_view_set_save_callback(WhHuntView* hunt, WhHuntSaveCallback cb, voi
 /** Register the callback fired when the user presses Down to toggle elicitation. */
 void wh_hunt_view_set_elicit_callback(WhHuntView* hunt, WhHuntElicitCallback cb, void* context);
 
-/** Set the target's IP / hostname (shown as the header label; either may be ""). */
-void wh_hunt_view_set_ip(WhHuntView* hunt, const char* ip, const char* host);
+/** Set the target's IP / hostname / device class (the header label is the first of
+ * hostname, class, IP that is set; any may be ""). */
+void wh_hunt_view_set_ip(
+    WhHuntView* hunt,
+    const char* ip,
+    const char* host,
+    const char* dtype);
 
 /** Whether elicitation is offered here (connected + target IP known). */
 void wh_hunt_view_set_elicit_available(WhHuntView* hunt, bool available);
