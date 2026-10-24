@@ -21,15 +21,17 @@ sourcecode:
     commit_sha: 00aae1a59394012e84ccee2543e946b976539595
     subdir: flipper_app
 
-# Unmodified qFlipper screenshots. The first entry is used as the catalog
+# Unmodified qFlipper screenshots, only ones that show no network or device
+# identifiers (the censored set lives in docs/screenshots). The first entry is used as the catalog
 # preview; reorder the list to change which shot is the preview.
 screenshots:
-  - catalog/screenshots/main_screen.png
-  - catalog/screenshots/networks.png
-  - catalog/screenshots/network_detail.png
-  - catalog/screenshots/hunting_ap.png
-  - catalog/screenshots/device_detail.png
-  - catalog/screenshots/hunting_device.png
+  - catalog/screenshots/main_menu.png
+  - catalog/screenshots/hunt_device_ping.png
+  - catalog/screenshots/hunt_device_lost.png
+  - catalog/screenshots/device_scope.png
+  - catalog/screenshots/spectrum.png
+  - catalog/screenshots/settings.png
+  - catalog/screenshots/board_info.png
 
 changelog: "@catalog/changelog.md"
 

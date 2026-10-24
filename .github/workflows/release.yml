@@ -74,6 +74,8 @@ jobs:
           echo "ufbt=ufbt-${{ runner.os }}-$FLIPPER_SDK" >> "$GITHUB_OUTPUT"
           pio=$(sed -nE 's/^(platform|platform_packages) *= *//p' firmware/platformio.ini | tr -s ' \n' '+' | sed 's/+$//')
           echo "pio=pio-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-$pio" >> "$GITHUB_OUTPUT"
+          # Artifact names can't contain '/', which branch names like claude/x do.
+          echo "artifact=wavehound-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v6
         id: ufbt
@@ -114,7 +116,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: wavehound-${{ github.ref_name }}
+          name: ${{ steps.keys.outputs.artifact }}
           path: dist/
           retention-days: 7
 

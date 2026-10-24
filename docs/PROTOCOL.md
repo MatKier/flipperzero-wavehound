@@ -153,15 +153,10 @@ only displays them): `Chromecast`, `Sonos`, `Roku`, `Smart TV`, `AirPlay`,
 `HomeKit`, `Speaker`, `Printer`, `Media player`, `Apple device`, `Router`, `NAS`,
 `Computer`, `Web UI`.
 
-The timing of the sweep passes and listen windows is diagrammed in
-[DISCOVERY.md](DISCOVERY.md).
-
-Each trigger probes the subnet a few times with a short gap, not once: a device
-in power-save often misses its single ARP, so later passes re-probe only the
-addresses still missing (the ones already found are skipped) and give each
-still-unnamed host another reverse-DNS/NBNS attempt (bounded, so a host with no
-name isn't retried forever). Reverse DNS/NBNS and the ARP table are all handled
-on the board; the Flipper only consumes the `IP` lines.
+Each trigger runs a few passes over the subnet, since a device in power-save
+often misses a single ARP; the passes, listen windows and retry limits are in
+[DISCOVERY.md](DISCOVERY.md). ARP, reverse DNS/NBNS and the host table are all
+handled on the board; the Flipper only consumes the `IP` lines.
 
 ### Elicitation
 

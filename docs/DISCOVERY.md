@@ -65,8 +65,11 @@ services keeps the most specific label.
   already have named it; the mDNS name then replaces that name.
 - An answer whose IP is not in the host table yet is parked in a small pending
   cache (`ND_PEND_MAX` = 8) and applied when ARP discovers the host.
+- A host gets at most `ND_NAME_MAX_TRIES` (3) reverse-DNS/NBNS attempts across
+  passes and sweeps, so one with no name isn't retried forever.
 - Nothing is read after pass 2, so a device that answers only then is picked up
   by the next sweep.
 
 Timings are the `ND_*` constants at the top of `net_discover.c`
-(`ND_QUERY_DRAIN_MS`, `ND_PASS_GAP_MS`, `ND_QUERY_SENDS`, `ND_SWEEP_PASSES`).
+(`ND_QUERY_DRAIN_MS`, `ND_PASS_GAP_MS`, `ND_QUERY_SENDS`, `ND_SWEEP_PASSES`,
+`ND_NAME_MAX_TRIES`).

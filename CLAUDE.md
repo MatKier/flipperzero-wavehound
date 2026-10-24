@@ -23,38 +23,8 @@ must run on the ESP32 in real time, so it lives in the board firmware, not the a
 
 ## Layout
 
-```
-firmware/main/
-  main.c      UART command parser (HUNT/DISCOVER/SPECTRUM/INFO/...)
-  radio.c     discover / hunt / spectrum state machine + promiscuous RX callback
-  info.c      board version / identity / health (INFO reply)
-  net_discover.c  ARP sweep + mDNS/SSDP/PTR/NBNS name & type discovery (IP lines), elicitation ping
-  proto.c     UART line I/O            proto.h  has WH_FW_VERSION
-  led.c       RGB LED heat indicator (LEDC PWM)
-  Kconfig.projbuild  pins, baud, LED, max channel (menuconfig -> Wavehound)
-firmware/git_version.py  PlatformIO pre-script: reconfigure when `git describe` changes (INFO Commit)
-flipper_app/
-  application.fam         app manifest (appid, fap_version, assets)
-  wavehound.c             entry, board power/expansion, board line parser
-  wavehound_i.h           WavehoundApp struct, WhTarget/WhSavedMac, view & event enums
-  wh_uart.c               USART worker, line splitting, keep-alive ping
-  wh_store.c              saved MACs: load/add/update/delete on SD
-  wh_settings.c           app settings: load/save on SD (settings.txt)
-  wh_oui.c                vendor lookup from SD oui.db (binary search, no RAM load)
-  scenes/                 one file per screen (scene-manager pattern)
-  views/                  custom views: hunt, spectrum
-  assets/oui.db           bundled vendor db, committed (generated from tools/manuf.gz)
-tools/gen_oui.py          build oui.db from Wireshark's manuf
-tools/manuf.gz            the Wireshark manuf oui.db is built from (committed, GPL-2.0+)
-licenses/GPL-2.0.txt      license of manuf.gz / oui.db
-tools/package_release.py  collect release files (fap, board bins, merged bin, notices)
-build_app.py              run ufbt (--update-db: refresh oui.db + manuf.gz first)
-.github/workflows/release.yml  build app + firmware on every branch push (CI); on v* tag also publish the release
-.github/workflows/toolchain-check.yml  weekly: open an issue when a newer Flipper SDK or espressif32 platform is released
-THIRD_PARTY_NOTICES.md    licenses of what the release binaries and the repo's Wireshark data contain
-docs/PROTOCOL.md          the UART protocol (source of truth for the wire format)
-docs/DISCOVERY.md         logged-in host discovery flow (passes, listen windows, name precedence)
-```
+The file-by-file map is [docs/LAYOUT.md](docs/LAYOUT.md). Keep it current when
+you add, move or remove a source file.
 
 ## Scene pattern (flipper_app)
 
@@ -164,13 +134,11 @@ and `screenshots/`.
 - The manifest's `changelog` and `screenshots` paths must point at files that
   exist.
 - `commit_sha` must point at the commit on `main` that actually carries the
-  submitted code — i.e. the **squash-merge commit** of the release PR (the same
-  commit the `v<version>` tag is on). That SHA doesn't exist until the PR merges,
-  so the normal flow is: merge the PR, then make a small follow-up commit on
-  `main` that sets `commit_sha` to the merge commit (message like
-  `catalog: set manifest commit_sha to the merged commit`). That follow-up commit
-  is **not** itself the referenced/tagged commit. See `v1.2` → `046038f` and
-  `v1.3` → `a2a3f32` for the pattern.
+  submitted code: the **squash-merge commit** of the release PR, the same commit
+  the `v<version>` tag is on (flow in [Tagging a release](#tagging-a-release)).
+  The follow-up commit that sets it (message like
+  `catalog: set manifest commit_sha to the merged commit`) is **not** itself the
+  referenced/tagged commit. See `v1.2` → `046038f` and `v1.3` → `a2a3f32`.
 
 Path gotcha: the catalog bundler resolves the manifest's `@file` and screenshot
 paths relative to `sourcecode.subdir` (`flipper_app`), **not** to the manifest's
