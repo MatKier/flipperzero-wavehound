@@ -17,7 +17,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `DISCONNECT`          | Drop the association and return to pure receive-only sniffing. Answered with `CONN,DOWN`. |
 | `WPS` / `WPS,STOP`    | Start / cancel WPS push-button (PBC) enrolment (v10+). On success the board reports the negotiated credentials ([`WPS,OK,...`](#wps)) and associates; `WPS,STOP` cancels an armed exchange. |
 | `ELICIT,<mac>,<ms>` / `ELICIT,STOP` | Start / stop poking a target so a silent device can be hunted (v12+). Needs a DHCP lease (else `ERR`). The board pings `<mac>` every `<ms>` (clamped 50-1000) with a unicast ARP request and an ICMP echo; the replies are frames the hunt samples. The target's IP is taken from the [host-discovery](#host-discovery) table. See [Elicitation](#elicitation). |
-| `RESOLVE[,<mac>]` | Re-run [host discovery](#host-discovery) now (v15+): a fresh ARP sweep that re-announces every known host as `IP,...`. A no-op without a lease. The app sends this while a hunt target's IP is still unknown, so it (and its name) can fill in on the hunt screen. The optional `<mac>` is ignored — the sweep is subnet-wide — but accepted for forward compatibility. |
+| `RESOLVE[,<mac>]` | Re-run [host discovery](#host-discovery) now (v15+): a fresh host-discovery sweep (ARP, then the mDNS/SSDP and name lookups) that re-announces every known host as `IP,...`. A no-op without a lease. The app sends this while a hunt target's IP is still unknown, so it (and its name) can fill in on the hunt screen. The optional `<mac>` is ignored — the sweep is subnet-wide — but accepted for forward compatibility. |
 | `INFO`                | Report board version, identity and health as an `INFO_BEGIN` / `BI,...` / `INFO_END` block. |
 | `STOP`                | Return to idle (radio listening off). Ends whatever is running: a hunt, a spectrum sweep or a discovery. The idle LED stays lit (blue). |
 | `SLEEP`               | Like `STOP`, but also turn the LED off (dark idle). The app sends this on exit, since the board stays powered on the Flipper's always-on 3V3 rail. |
@@ -123,9 +123,10 @@ WPS needs sniffer mode off, so it only runs from idle; starting any scan or
 
 Once associated and holding a lease, the board sweeps its subnet with ARP to map
 each host's MAC to an IPv4, and streams an `IP,<mac>,<ip>` line per host found.
-It then makes a best-effort hostname attempt — reverse DNS (a PTR query to the
-AP's DNS server), falling back to NBNS (a NetBIOS node-status query to the host)
-— and, when one resolves, re-sends the line as `IP,<mac>,<ip>,<host_hex>`. Many
+It then makes a best-effort hostname attempt — after the mDNS/SSDP step below,
+reverse DNS (a PTR query to the AP's DNS server), falling back to NBNS (a
+NetBIOS node-status query to the host) — and, when one resolves, re-sends the
+line as `IP,<mac>,<ip>,<host_hex>`. Many
 consumer networks return no name; the IP is always provided. The app keys on
 `<mac>` to show IPs/names against the clients it already lists and the target it
 hunts. A fresh sweep runs when a client scan starts, so the list stays current.
@@ -142,7 +143,7 @@ still unnamed. The most specific type wins when a device advertises several. The
 questions are sent from an ephemeral port, so replies come back unicast and the
 board never joins a multicast group. Types are chosen by the board (the Flipper
 only displays them): `Chromecast`, `Sonos`, `Roku`, `Smart TV`, `AirPlay`,
-`HomeKit`, `Speaker`, `Printer`, `Media player`, `Apple device`, `NAS`, `Router`,
+`HomeKit`, `Speaker`, `Printer`, `Media player`, `Apple device`, `Router`, `NAS`,
 `Computer`, `Web UI`.
 
 The timing of the sweep passes and listen windows is diagrammed in

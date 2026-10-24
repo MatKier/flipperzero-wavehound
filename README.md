@@ -94,9 +94,11 @@ offered a login before its client list is shown:
 After a successful join you can save the password to **Saved APs** for next
 time. The client list and the hunt screen then show each device's **IP** and,
 when it can be resolved, a **hostname** and device **type** (best-effort: an
-mDNS/Bonjour and UPnP/SSDP query first, which is how a TV or printer becomes
-"Living Room TV · Chromecast", then reverse-DNS and NBNS for the rest; the type
-needs board firmware v16).
+mDNS/Bonjour and UPnP/SSDP query first, which is how a TV or printer gets a
+name like "Living Room TV" and a type like *Chromecast*, then reverse-DNS and
+NBNS for the rest; the type needs board firmware v16, and the list and hunt
+header show it only when the device has no name, while the details screen shows
+both).
 
 Discovery stays radio-first either way: the client list is built only from
 devices actually heard over the air, keyed by MAC. Not logged in, that is all
@@ -133,6 +135,7 @@ firmware/     ESP-IDF project for the ESP32-S2 on the WiFi dev board
   main/main.c     command parser
   main/radio.c    discover / hunt / spectrum state machine + promiscuous callback
   main/info.c     board version / identity / health report (INFO)
+  main/net_discover.c  ARP sweep + mDNS/SSDP/PTR/NBNS name & type discovery, elicitation ping
   main/proto.c    UART line I/O
   main/led.c      RGB LED (LEDC PWM)
 flipper_app/  Flipper external app (uFBT)

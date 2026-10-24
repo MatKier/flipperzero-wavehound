@@ -22,13 +22,15 @@ void wh_scene_details_on_enter(void* context) {
     widget_reset(w);
 
     /* Identity line: an AP shows its SSID (its row can pick up the gateway IP,
-     * so IP must not win there); a station prefers its resolved host / IP when
-     * known, matching the client list and hunt header. */
+     * so IP must not win there); a station prefers its resolved host, then its
+     * device class, then IP, matching the client list and hunt header. */
     const char* title;
     if(t->is_ap) {
         title = t->name[0] ? t->name : "(hidden AP)";
     } else if(t->host[0]) {
         title = t->host;
+    } else if(t->dtype[0]) {
+        title = t->dtype;
     } else if(t->ip[0]) {
         title = t->ip;
     } else if(t->name[0]) {

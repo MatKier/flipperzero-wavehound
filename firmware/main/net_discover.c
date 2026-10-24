@@ -450,7 +450,7 @@ static void emit_ip(const uint8_t mac[6], uint32_t ip_net, const char *name, con
     }
 }
 
-/* Announce every host found but not yet reported (IP only). */
+/* Announce every host found but not yet reported (with its name/type if known). */
 static void emit_pending_ips(void)
 {
     for (;;) {

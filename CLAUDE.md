@@ -28,6 +28,7 @@ firmware/main/
   main.c      UART command parser (HUNT/DISCOVER/SPECTRUM/INFO/...)
   radio.c     discover / hunt / spectrum state machine + promiscuous RX callback
   info.c      board version / identity / health (INFO reply)
+  net_discover.c  ARP sweep + mDNS/SSDP/PTR/NBNS name & type discovery (IP lines), elicitation ping
   proto.c     UART line I/O            proto.h  has WH_FW_VERSION
   led.c       RGB LED heat indicator (LEDC PWM)
   Kconfig.projbuild  pins, baud, LED, max channel (menuconfig -> Wavehound)
