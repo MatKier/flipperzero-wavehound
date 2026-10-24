@@ -24,14 +24,11 @@ Wavehound is **receive-only by default**: it reads frame headers to measure
 signal strength and never transmits. The one exception is the opt-in login for
 [hunting silent devices](#hunting-silent-devices-optional).
 
-**Why its own board firmware?** [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder)
-can be driven over UART too, but its fox-hunt channel logic (park on the
-target's channel, sweep to find it, re-acquire it when it goes quiet) lives in
-its TFT code, which the screenless dev-board build compiles out. What is left
-reports RSSI only on the channel the hunt started on, and its station scan hops
-every channel with no way to pin one. Wavehound's firmware does that channel
-work on the board, plus a strict client filter, which is what makes close-in
-hunting of an occasional transmitter practical.
+**Why its own board firmware?** None of the
+[ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) apps that
+expose its fox hunt gave me a UX I enjoyed, so Wavehound runs its own channel
+logic on the board: park on the target's channel, sweep until it is heard, and
+re-acquire it when it goes quiet.
 
 ```
 ┌──────────── Flipper Zero ─────────────┐        ┌──── WiFi dev board (ESP32-S2) ─────┐
