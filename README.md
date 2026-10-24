@@ -9,10 +9,11 @@ the meter fills and the board's RGB LED shifts from blue to red as the signal
 gets stronger.
 
 <p align="center">
-  <img src="flipper_app/catalog/screenshots/main_screen.png" alt="Wavehound main menu on the Flipper Zero" width="400">
-  <img src="flipper_app/catalog/screenshots/hunting_device.png" alt="Wavehound hunt screen showing signal strength" width="400">
+  <img src="flipper_app/catalog/screenshots/hunt_device_ping.png" alt="Wavehound hunt screen: signal strength, meter and elicitation ping" width="400">
+  <img src="flipper_app/catalog/screenshots/main_menu.png" alt="Wavehound main menu on the Flipper Zero" width="400">
 </p>
 
+More screens are in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 Typical uses:
 
 - Find that forgotten access point, repeater or IoT plug hidden in a ceiling or closet.
@@ -75,8 +76,9 @@ The board parks on the target's channel and reports the signal strength of
 every frame that MAC sends (beacons, data, probes) every 100 ms. The screen
 shows:
 
-- a big dBm readout with the frame rate (`/s`), a COLD/COOL/WARM/HOT! label and
-  a trend arrow for whether the signal is rising or falling as you move;
+- a big dBm readout with the frame rate (`/s`), a COLD/COOL/WARM/HOT! label
+  (SEEK while searching, LOST once a locked target goes quiet) and a trend
+  arrow for whether the signal is rising or falling as you move;
 - a meter with peak (`pk`) and noise-floor markers, the noise floor value
   (`nf`) and a ~12-second signal graph;
 - `?ch` in the corner while the board is still searching channels. Once a heard
@@ -207,7 +209,7 @@ precedence over the bundled copy. Format, refresh and licensing are in
 [docs/VENDOR_DB.md](docs/VENDOR_DB.md).
 
 <p align="center">
-  <img src="flipper_app/catalog/screenshots/device_detail.png" alt="Wavehound device details screen showing the resolved vendor" width="400">
+  <img src="docs/screenshots/device_details.png" alt="Wavehound device details screen showing the resolved vendor" width="400">
 </p>
 
 ## Install
