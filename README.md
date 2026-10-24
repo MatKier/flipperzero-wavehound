@@ -312,16 +312,9 @@ folder a Flipper Apps Catalog install uses; the app shows up under
 
 ## Repository layout
 
-```
-firmware/     ESP-IDF board firmware (PlatformIO): command parser, radio state machine, host discovery, LED
-flipper_app/  the Flipper app (uFBT): scenes/ (one per screen), views/ (hunt, spectrum), assets/oui.db
-tools/        oui.db generator, the Wireshark manuf it is built from, release packaging
-docs/         PROTOCOL.md (UART protocol), DISCOVERY.md (logged-in host discovery)
-.github/      CI build on every push, release on a v* tag, weekly toolchain check
-build_app.py  build the app; --update-db refreshes the vendor database
-```
-
-The per-file map is in [CLAUDE.md](CLAUDE.md#layout).
+`firmware/` is the board firmware, `flipper_app/` the Flipper app, `tools/` the
+vendor-database and release scripts. The file-by-file map is in
+[docs/LAYOUT.md](docs/LAYOUT.md).
 
 ## Protocol
 
