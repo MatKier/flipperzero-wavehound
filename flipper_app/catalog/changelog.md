@@ -1,3 +1,14 @@
+## v1.16
+
+- **Friendlier device names and types.** While joined to a network, the board now
+  also asks the network's devices who they are (mDNS/Bonjour and UPnP/SSDP — the
+  same announcements phones, TVs, speakers and printers answer). Devices that
+  used to show up as a bare IP can now appear as "Living Room TV", with a type
+  such as *Chromecast*, *Printer* or *AirPlay* in the client list, details and
+  hunt screen. Needs board firmware v16 or newer; older boards keep working and
+  simply show no type. It sends a few multicast queries during the existing
+  network scan, nothing new to configure.
+
 ## v1.15
 
 - Fixed a bug where logging in to an access point by **WPS** could save a wrong

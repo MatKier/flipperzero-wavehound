@@ -30,6 +30,9 @@ static void format_label(const WhTarget* t, char* out, size_t size) {
     } else if(t->host[0]) {
         /* a resolved hostname is the most useful identity */
         snprintf(out, size, "%d c%u %s", t->rssi, t->channel, t->host);
+    } else if(t->dtype[0]) {
+        /* no name, but mDNS/SSDP said what it is; the IP (if known) trails it */
+        snprintf(out, size, "%d c%u %s %s", t->rssi, t->channel, t->dtype, t->ip);
     } else if(t->ip[0]) {
         snprintf(out, size, "%d c%u %s", t->rssi, t->channel, t->ip);
     } else {

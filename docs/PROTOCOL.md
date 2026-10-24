@@ -63,7 +63,7 @@ put `PIN` before any token.
 | `DEV,<mac>,<ch>,<rssi>,<frames>,<flags>,<ssid>` | One transmitter, streamed once in discovery order as it is first heard (max 96; the board tracks up to 192). `rssi` is the strongest frame heard. `flags` is an unordered set of single-char codes: `A` access point (sent beacons) or `S` station; `R` if the MAC is locally administered (randomized); and, for an AP whose beacon was parsed, one security code (`o` open, `w` WEP, `1` WPA, `2` WPA2, `3` WPA3) and one PHY code (`g` 802.11b/g, `n` 802.11n, `c` 802.11ac, `x` 802.11ax). Security and PHY codes are absent for stations and for older firmware; readers must match codes individually, not by position. `ssid` (rest of line) is only set for access points. For APs, `ch` comes from the beacon's DS parameter set. |
 | `CONN,<state>[,...]`                           | Station-association progress (v9+). See [Association](#association). |
 | `WPS,<state>[,...]`                            | WPS push-button progress (v10+). See [WPS](#wps). |
-| `IP,<mac>,<ip>[,<host_hex>]`                   | A host found on the associated subnet (v11+): its MAC, IPv4, and — once a best-effort lookup finds one — its [hex-encoded](#hex-encoded-fields) hostname. Streamed as an ARP sweep learns hosts; the IP is sent first and the same line is re-sent with a hostname if one is resolved. The app matches by `<mac>` to annotate list/hunt rows. See [Host discovery](#host-discovery). |
+| `IP,<mac>,<ip>[,<host_hex>[,<type>]]`          | A host found on the associated subnet (v11+): its MAC, IPv4, and — once a best-effort lookup finds one — its [hex-encoded](#hex-encoded-fields) hostname. Streamed as an ARP sweep learns hosts; the IP is sent first and the same line is re-sent with a hostname if one is resolved. `<type>` (v16+) is a short device-class label such as `Chromecast` or `Printer`, the rest of the line (spaces allowed, never a comma); it is absent when unknown, and the host field is left empty (`IP,<mac>,<ip>,,Printer`) when only a type is known. Older apps stop reading at the host field and ignore it. The app matches by `<mac>` to annotate list/hunt rows. See [Host discovery](#host-discovery). |
 | `ELICIT,ON,<ms>` / `ELICIT,OFF`                | Elicitation state (v12+): poking `<mac>` every `<ms>` has started / stopped. |
 | `INFO_BEGIN`                                   | Start of an `INFO` reply.             |
 | `BI,<label>,<value>`                           | One board-info row (reply to `INFO`). `value` is the rest of the line and never contains a comma. Labels include Firmware, Commit, Built, IDF (run/build), ELF SHA, Chip, Cores, Radio, MAC, Assoc, IP, Flash, App part, App used, Heap free/min, Uptime, Temp, Reset. `Firmware` is the board firmware version (the same value carried by `READY`/`PONG`); `Commit` is the build system's version string (`git describe` for a git checkout, else `version.txt`/`PROJECT_VER`). `Assoc` is the SSID the board is associated with (`-` when not), `IP` its DHCP lease (`-` when none). `App part` is the flash slot reserved for the firmware; `App used` is the running image's actual size and its fill of that slot. |
@@ -129,6 +129,21 @@ AP's DNS server), falling back to NBNS (a NetBIOS node-status query to the host)
 consumer networks return no name; the IP is always provided. The app keys on
 `<mac>` to show IPs/names against the clients it already lists and the target it
 hunts. A fresh sweep runs when a client scan starts, so the list stays current.
+
+Name discovery (v16+): alongside the sweep the board sends one mDNS/DNS-SD
+question (PTR for ~14 common service types such as Chromecast, AirPlay,
+HomeKit, printers, file shares) and a few SSDP searches (DIAL, MediaRenderer,
+InternetGatewayDevice), then listens for the answers. Gear that gives no reverse
+DNS/NBNS name typically answers these. Each answer is matched to a host by its
+source IP: an mDNS answer supplies the DNS-SD instance name (or the TXT friendly
+name) as the hostname and a device `<type>`; an SSDP answer supplies a type only.
+An mDNS name is preferred over reverse DNS/NBNS, which then only run for hosts
+still unnamed. The most specific type wins when a device advertises several. The
+questions are sent from an ephemeral port, so replies come back unicast and the
+board never joins a multicast group. Types are chosen by the board (the Flipper
+only displays them): `Chromecast`, `Sonos`, `Roku`, `Smart TV`, `AirPlay`,
+`HomeKit`, `Speaker`, `Printer`, `Media player`, `Apple device`, `NAS`, `Router`,
+`Computer`, `Web UI`.
 
 Each trigger probes the subnet a few times with a short gap, not once: a device
 in power-save often misses its single ARP, so later passes re-probe only the

@@ -159,6 +159,7 @@ static WhTarget* wh_results_slot(WavehoundApp* app, const char* mac) {
         if(strcmp(app->pending_ips[i].mac, mac) == 0) {
             strlcpy(t->ip, app->pending_ips[i].ip, sizeof(t->ip));
             strlcpy(t->host, app->pending_ips[i].host, sizeof(t->host));
+            strlcpy(t->dtype, app->pending_ips[i].dtype, sizeof(t->dtype));
             app->pending_ips[i] = app->pending_ips[--app->pending_ip_count];
             break;
         }
@@ -222,14 +223,16 @@ static void wh_on_line(char* line, void* context) {
         }
         furi_mutex_release(app->results_mutex);
     } else if(strcmp(tag, "IP") == 0) {
-        /* IP,<mac>,<ip>[,<host_hex>] -- annotate the matching client row and, if
-         * it's the target we're hunting, the hunt screen. */
+        /* IP,<mac>,<ip>[,<host_hex>[,<type>]] -- annotate the matching client row
+         * and, if it's the target we're hunting, the hunt screen. The type (v16+)
+         * is absent from older firmware, so next_field just returns NULL. */
         const char* mac = next_field(&cur);
         const char* ip = next_field(&cur);
         if(!mac || !ip) return;
         char host[33] = "";
         const char* host_hex = next_field(&cur);
         if(host_hex) wh_hex_decode(host_hex, host, sizeof(host));
+        const char* dtype = next_field(&cur);
 
         furi_mutex_acquire(app->results_mutex, FuriWaitForever);
         bool matched = false;
@@ -237,6 +240,8 @@ static void wh_on_line(char* line, void* context) {
             if(strcmp(app->results[i].mac, mac) == 0) {
                 strlcpy(app->results[i].ip, ip, sizeof(app->results[i].ip));
                 if(host[0]) strlcpy(app->results[i].host, host, sizeof(app->results[i].host));
+                if(dtype && dtype[0])
+                    strlcpy(app->results[i].dtype, dtype, sizeof(app->results[i].dtype));
                 matched = true;
                 break;
             }
@@ -255,11 +260,13 @@ static void wh_on_line(char* line, void* context) {
             if(!p && app->pending_ip_count < WH_MAX_RESULTS) {
                 p = &app->pending_ips[app->pending_ip_count++];
                 p->host[0] = '\0';
+                p->dtype[0] = '\0';
             }
             if(p) {
                 strlcpy(p->mac, mac, sizeof(p->mac));
                 strlcpy(p->ip, ip, sizeof(p->ip));
                 if(host[0]) strlcpy(p->host, host, sizeof(p->host));
+                if(dtype && dtype[0]) strlcpy(p->dtype, dtype, sizeof(p->dtype));
             }
         }
         furi_mutex_release(app->results_mutex);
@@ -270,7 +277,9 @@ static void wh_on_line(char* line, void* context) {
         if(!app->target.is_ap && strcmp(mac, app->target.mac) == 0) {
             strlcpy(app->target.ip, ip, sizeof(app->target.ip));
             if(host[0]) strlcpy(app->target.host, host, sizeof(app->target.host));
-            wh_hunt_view_set_ip(app->hunt, app->target.ip, app->target.host);
+            if(dtype && dtype[0])
+                strlcpy(app->target.dtype, dtype, sizeof(app->target.dtype));
+            wh_hunt_view_set_ip(app->hunt, app->target.ip, app->target.host, app->target.dtype);
         }
     } else if(strcmp(tag, "INFO_BEGIN") == 0) {
         furi_mutex_acquire(app->results_mutex, FuriWaitForever);

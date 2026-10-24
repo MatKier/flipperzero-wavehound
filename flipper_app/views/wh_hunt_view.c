@@ -39,6 +39,7 @@ typedef struct {
     int8_t rssi_ceil;  /* dBm where the meter reads full */
     char ip[16];       /* target IPv4 (shown as the label), else empty */
     char host[33];     /* target hostname (preferred label), else empty */
+    char dtype[16];    /* target device class (label when there is no hostname), else empty */
     bool elicit_avail; /* elicitation offered (connected + IP known) */
     bool elicit_on;    /* elicitation currently running */
 } WhHuntModel;
@@ -92,8 +93,12 @@ static void wh_hunt_draw(Canvas* canvas, void* model) {
     }
     canvas_draw_str_aligned(canvas, 128, 0, AlignRight, AlignTop, buf);
     canvas_set_font(canvas, FontPrimary);
-    /* Prefer a resolved hostname, then the IP, falling back to the SSID/MAC. */
-    const char* label = m->host[0] ? m->host : (m->ip[0] ? m->ip : m->name);
+    /* Prefer a resolved hostname, then the device class, then the IP, falling
+     * back to the SSID/MAC. */
+    const char* label = m->host[0]  ? m->host :
+                        m->dtype[0] ? m->dtype :
+                        m->ip[0]    ? m->ip :
+                                      m->name;
     FuriString* name = furi_string_alloc_set(label);
     elements_string_fit_width(canvas, name, 104);
     canvas_draw_str(canvas, 0, 9, furi_string_get_cstr(name));
@@ -384,13 +389,18 @@ void wh_hunt_view_set_elicit_callback(WhHuntView* hunt, WhHuntElicitCallback cb,
     hunt->elicit_ctx = context;
 }
 
-void wh_hunt_view_set_ip(WhHuntView* hunt, const char* ip, const char* host) {
+void wh_hunt_view_set_ip(
+    WhHuntView* hunt,
+    const char* ip,
+    const char* host,
+    const char* dtype) {
     with_view_model(
         hunt->view,
         WhHuntModel * m,
         {
             strlcpy(m->ip, ip ? ip : "", sizeof(m->ip));
             strlcpy(m->host, host ? host : "", sizeof(m->host));
+            strlcpy(m->dtype, dtype ? dtype : "", sizeof(m->dtype));
         },
         true);
 }
