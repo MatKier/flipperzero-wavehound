@@ -1,3 +1,12 @@
+## v1.18
+
+- **New searches no longer stay stuck on a joined network's channel.** After
+  logging in to an access point to hunt one of its clients, going back to the
+  device-search channel list and starting a new search ("All channels",
+  "Clients of nearby AP..." or a single channel) now leaves that network first,
+  so the scan hops/parks freely again. Backing out to the main menu still keeps
+  the connection, so Board info shows it.
+
 ## v1.17
 
 - **Fingerprint a target.** When you are logged in to a network and a device's IP

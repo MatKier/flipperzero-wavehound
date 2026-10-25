@@ -246,6 +246,9 @@ void wh_ap_connect(WavehoundApp* app);
 /** Continue from the AP-login flow to the client list (collapses to ChannelSelect). */
 void wh_ap_login_proceed(WavehoundApp* app);
 
+/** Drop the AP link (if any) so a new search can hop/park freely. */
+void wh_conn_drop(WavehoundApp* app);
+
 /** Whether a fingerprint can be run on app->target now: associated, the target
  * is a station with a known IP, and the board firmware supports FP. */
 bool wh_fingerprint_avail(WavehoundApp* app);
