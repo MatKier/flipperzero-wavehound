@@ -129,6 +129,22 @@ void wh_ap_login_proceed(WavehoundApp* app) {
     scene_manager_search_and_switch_to_previous_scene(app->scene_manager, WhSceneChannelSelect);
 }
 
+/* A fresh search needs channel freedom, but the board pins itself to the AP's
+ * channel while associated (set_channel is a no-op then), so a scan started
+ * after login would only ever see the AP's channel. Drop the link before every
+ * new search (main menu and channel picker); the "Clients of nearby AP" login
+ * flow re-associates on demand. Not called when merely backing out to the main
+ * menu, so Board info still shows Assoc/IP. Harmless when not connected. */
+void wh_conn_drop(WavehoundApp* app) {
+    if(app->conn.connected || app->conn.connecting) {
+        wh_send(app, "DISCONNECT");
+        /* Reflect it locally at once; the board's CONN,DOWN confirms it and also
+         * clears conn.ip (see the CONN handler below). */
+        app->conn.connecting = false;
+        app->conn.connected = false;
+    }
+}
+
 /* ---------- board line parsing (UART worker thread) ---------- */
 
 static char* next_field(char** cursor) {

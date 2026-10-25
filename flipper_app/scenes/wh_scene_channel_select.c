@@ -84,7 +84,10 @@ bool wh_scene_channel_select_on_event(void* context, SceneManagerEvent event) {
         return true;
     }
 
+    /* Every pick below starts a new scan. Backing out of a logged-in client hunt
+     * lands here still associated, which would pin it to that AP's channel. */
     if(event.event == ITEM_FROM_AP) {
+        wh_conn_drop(app);
         app->picking_ap_channel = true;
         app->search_kind = WhSearchAccessPoints;
         scene_manager_next_scene(app->scene_manager, WhSceneTargetList);
@@ -92,6 +95,7 @@ bool wh_scene_channel_select_on_event(void* context, SceneManagerEvent event) {
     }
 
     if(event.event > WH_MAX_CHANNEL) return false;
+    wh_conn_drop(app);
     const uint8_t ch = (uint8_t)event.event; /* 0 = all / auto */
     if(app->channel_purpose == WhChannelForDeviceSearch) {
         app->device_channel = ch;
