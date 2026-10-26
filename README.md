@@ -32,9 +32,12 @@ signal strength and never transmits. The one exception is the opt-in login for
 
 **Why its own board firmware?** None of the
 [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) apps that
-expose its fox hunt gave me a UX I enjoyed, so Wavehound runs its own channel
-logic on the board: park on the target's channel, sweep until it is heard, and
-re-acquire it when it goes quiet.
+expose its fox hunt gave me a UX I enjoyed. I
+[tried building exactly that](https://github.com/MatKier/flipperzero-marauder-wavehound)
+too, but could not get it to work the way I wanted. So Wavehound runs its own
+channel logic on the board: park on the target's channel, sweep until it is
+heard, and re-acquire it when it goes quiet. It also adds extras such as the
+elicitation ping, device metadata and fingerprinting.
 
 ```
 ┌──────────── Flipper Zero ─────────────┐        ┌──── WiFi dev board (ESP32-S2) ─────┐
@@ -273,8 +276,7 @@ own risk, and I don't guarantee it won't damage, brick or otherwise break your
 hardware. You are responsible for anything that happens to your Flipper, dev
 board or other equipment.
 
-This code is AI-assisted: much of it was written with the help of AI tools.
-Review it yourself before trusting it or flashing it to your hardware.
+This code is AI-assisted, as the commit history shows.
 
 Only locate networks and devices you own or are explicitly authorized to
 locate. Wavehound is receive-only except for the optional login, elicitation
