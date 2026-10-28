@@ -31,16 +31,21 @@ void radio_hunt(const uint8_t mac[6], uint8_t channel, bool pinned, uint16_t hop
 /** Sweep all channels and stream per-channel activity. */
 void radio_spectrum(void);
 
+/** Most access points a DISCOVER_FILTER_CLIENTS listen accepts (mesh nodes). */
+#define RADIO_CLIENTS_BSSID_MAX 8
+
 /**
  * Listen continuously (hopping all channels, or only on `channel` if non-zero),
  * streaming each transmitter matching `filter` as it is first heard, until
- * radio_stop(). For DISCOVER_FILTER_CLIENTS, `bssid` is the access point whose
- * associated stations to report; it is ignored (and may be NULL) for every
- * other filter. `dwell_ms` is how long each tick (channel hop, when hopping)
- * lasts; 0 picks the default.
+ * radio_stop(). For DISCOVER_FILTER_CLIENTS, `bssids` are the `bssid_count`
+ * (1..RADIO_CLIENTS_BSSID_MAX) access points whose associated stations to
+ * report, e.g. the nodes of one mesh network; they are ignored (and may be NULL)
+ * for every other filter. `hop_mask` (bit n = channel n, 0 = none) hops only
+ * those channels instead, starting at `channel`. `dwell_ms` is how long each
+ * tick (channel hop, when hopping) lasts; 0 picks the default.
  */
-void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t bssid[6],
-                    uint16_t dwell_ms);
+void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t (*bssids)[6],
+                    uint8_t bssid_count, uint16_t hop_mask, uint16_t dwell_ms);
 
 /**
  * Associate with an access point in station mode, keeping promiscuous RX alive

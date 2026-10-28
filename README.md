@@ -56,8 +56,8 @@ elicitation ping, device metadata and fingerprinting.
 | Menu | What it does |
 |------|--------------|
 | **Hunt access point** | Lists access points as they are heard on any channel (by SSID; hidden networks by BSSID). |
-| **Hunt devices** | Lists everything that is not an access point: phones, laptops, smart plugs, cameras. Pick the scope first: **All channels (hop)**, one **Channel 1–13**, or **Clients of nearby AP…**, which scans for networks and then lists only the stations associated with the one you pick, on its channel. A fixed channel carries over to the hunt. |
-| **Enter MAC** | Type a MAC on the hex keypad (pre-filled with the last one), then pick **Auto (hop until heard)**, a channel, or **Channel of nearby AP…**. A chosen channel is pinned: the board stays there even while the target is quiet. Clients always use their AP's channel, so the AP option is the quick way to hunt a known client. |
+| **Hunt devices** | Lists everything that is not an access point: phones, laptops, smart plugs, cameras. Pick the scope first: **All channels (hop)**, one **Channel 1–13**, or **Clients of nearby AP…**, which scans for networks and then lists only the stations associated with the one you pick. On a mesh network or with an extender, every access point broadcasting the same network name counts (the header shows how many, e.g. `on 3 APs`), so clients of any node are listed; when the nodes are on different channels the scan hops just those. While [logged in](#hunting-silent-devices-optional), the board stays on the joined node's channel and only hears clients of nodes on it; the list then offers a **~ Node on ch N** row for each other channel, which rejoins the network through that node (same password) and lists its clients. If the switch fails, it rejoins the node you were on. A fixed channel carries over to the hunt. A client's hunt starts on its AP's channel but follows it if it roams to a mesh node or extender on another channel (unless you are [logged in](#hunting-silent-devices-optional), which keeps the board on the AP's channel). |
+| **Enter MAC** | Type a MAC on the hex keypad (pre-filled with the last one), then pick **Auto (hop until heard)**, a channel, or **Channel of nearby AP…**. A channel picked by number is pinned: the board stays there even while the target is quiet. Clients use their AP's channel, so the AP option is the quick way to hunt a known client; it starts there but is not pinned, so a client that roams to another mesh node is still found. |
 | **Saved MACs** | Favorites saved from the hunt screen. **Hunt** opens the channel picker with the saved channel pre-selected, **Edit** fixes the name, MAC or channel, **Delete** removes it. |
 | **Saved APs** | Wi-Fi passwords saved after a [login](#hunting-silent-devices-optional): **Edit password** or **Delete**. |
 | **Channel spectrum** | Sweeps channels 1–13 (120 ms each) and draws a bar per channel with peak hold, a sweep cursor, the busiest channel and the number of distinct transmitters per sweep. OK/Left/Right switch the metric between packets, max dBm and bytes. |
@@ -117,7 +117,7 @@ MACs, so saving a `*` MAC is of little use.
 | **Sound** | On / Muted (On) | The hunt screen's starting mute state. |
 | **Saved hunt ch** | Saved / Auto-hop / Nearby AP (Saved) | Which channel option is pre-selected when you hunt a saved MAC. |
 | **Hop dwell** | 100 ms–2 s (300 ms) | How long a hunt stays on each channel while searching. Shorter finds an AP faster, longer catches quiet stations. |
-| **Re-search** | 4–60 s (8 s) | How long a locked hunt tolerates silence before searching again. |
+| **Re-search** | 4–60 s (8 s) | How long a locked hunt tolerates silence before searching again. The search keeps coming back to the channel the target was last heard on, so a merely quiet target isn't lost. |
 | **Range** | Near / Normal / Far (Normal) | The dBm window the meter spans (−75..−25, −95..−30, −100..−50), which also sets the click and haptic rate. |
 | **Response** | Fast / Normal / Smooth (Normal) | How quickly the meter follows the signal. |
 | **Scan dwell** | 120 ms–2 s (120 ms) | How long a scan stays on each channel. |
@@ -204,6 +204,8 @@ app keeps working, but some features need at least:
 | Elicitation ping | v12 |
 | Device type from mDNS/SSDP | v16 |
 | Fingerprinting | v17 |
+| Re-search returns to the target's last channel (older firmware sweeps 1–13 plainly) | v18 |
+| Client list covers every node of a mesh network (older firmware: the picked AP only) | v18 |
 
 The app hides the login below v9 and **Scan** below v17. **Board info** shows
 the running version.

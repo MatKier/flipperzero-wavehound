@@ -1,3 +1,27 @@
+## v1.19
+
+- **Hunting a client now follows it across mesh nodes.** A device picked from
+  "Clients of nearby AP..." (or a MAC hunted on "Channel of nearby AP...") used
+  to be locked to that AP's channel for good, so a client that roamed to a mesh
+  node or extender on another channel went silent forever. The hunt still starts
+  on the AP's channel, but after the **Re-search** time without a frame it now
+  searches the other channels too. With board firmware v18 the search keeps
+  returning to the channel the target was last heard on between every other
+  channel, so a device that is merely quiet is still caught there. While logged
+  in to the network the board stays on its channel, as before. A channel you pick
+  by number stays pinned.
+- **Clients of a whole mesh network.** "Clients of nearby AP..." used to list
+  only the clients of the one access point you picked, so devices connected to
+  another mesh node or an extender never showed up. Now every access point
+  broadcasting the same network name counts, and the header says how many
+  (e.g. "on 3 APs"). When the nodes use different channels, the scan hops
+  between just those channels. While logged in, the board can only hear the
+  channel of the node it joined, so the list adds a **~ Node on ch N** row for
+  each other channel: pick it to rejoin the network through that node (same
+  password) and list its clients, with IPs and names. If that node won't take
+  the login (say, a neighbour's network with the same name), it rejoins the
+  node you were on. Needs board firmware v18.
+
 ## v1.18
 
 - **New searches no longer stay stuck on a joined network's channel.** After

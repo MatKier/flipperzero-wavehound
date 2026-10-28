@@ -59,6 +59,9 @@ typedef struct {
     uint16_t hop_periods;  /* hunt: 0 = HUNT_HOP_PERIODS */
     uint16_t lost_periods; /* hunt: 0 = HUNT_LOST_PERIODS */
     uint16_t dwell_ms;     /* discover: 0 = DISCOVER_DWELL_MS */
+    uint16_t hop_mask;     /* discover: channels to hop (bit n = ch n), 0 = none */
+    uint8_t bssids[RADIO_CLIENTS_BSSID_MAX][6]; /* discover CLIENTS: the APs */
+    uint8_t bssid_count;
     bool has_bssid;        /* connect: mac[] holds a BSSID to lock onto */
     char ssid[33];         /* connect: AP SSID */
     char psk[65];          /* connect: AP passphrase/PSK ("" = open); 64 + NUL */
@@ -126,15 +129,23 @@ static uint16_t s_unique_count;
 static discover_dev_t s_devs[DISCOVER_MAX];
 static volatile uint16_t s_dev_count;
 static volatile radio_discover_filter_t s_disc_filter;
-/* Target AP for DISCOVER_FILTER_CLIENTS. Set before promiscuous mode is enabled
- * (same hand-off as s_target), then read by the callback. */
-static uint8_t s_disc_bssid[6];
+/* Target APs for DISCOVER_FILTER_CLIENTS (one, or the nodes of a mesh). Set
+ * before promiscuous mode is enabled (same hand-off as s_target), then read by
+ * the callback. */
+static uint8_t s_disc_bssids[RADIO_CLIENTS_BSSID_MAX][6];
+static uint8_t s_disc_bssid_count;
 
 /* Radio-task-only state. */
 static uint8_t s_channel = 1;
 static bool s_hunt_locked;
 static bool s_hunt_pinned;
+/* Where the target was last heard (seeded with HUNT's <ch>, 0 = none yet). A
+ * search alternates this channel with each step of the sweep, so a quiet target
+ * that never left is still caught while one that roamed is found as well. */
+static uint8_t s_hunt_home;
+static uint8_t s_hunt_sweep; /* last non-home channel the search tried */
 static uint8_t s_disc_channel; /* 0 = hop */
+static uint16_t s_disc_hop_mask; /* hop only these channels (bit n = ch n), 0 = off */
 static uint32_t s_hunt_quiet_periods;
 static uint32_t s_hunt_hop_periods;
 static uint32_t s_hunt_hop_limit = HUNT_HOP_PERIODS;
@@ -230,6 +241,16 @@ static void copy_ssid(char *dst, const uint8_t *src, size_t len)
     dst[len] = '\0';
 }
 
+static bool disc_is_target_bssid(const uint8_t *mac)
+{
+    for (uint8_t i = 0; i < s_disc_bssid_count; i++) {
+        if (memcmp(mac, s_disc_bssids[i], 6) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void discover_frame(const uint8_t *hdr, uint16_t len, int8_t rssi, uint8_t channel,
                            bool is_mgmt)
 {
@@ -239,12 +260,12 @@ static void discover_frame(const uint8_t *hdr, uint16_t len, int8_t rssi, uint8_
     }
 
     if (s_disc_filter == DISCOVER_FILTER_CLIENTS) {
-        /* A client of the target AP: a data frame headed to the distribution
-         * system (ToDS=1, FromDS=0) whose receiver (addr1) is the BSSID. The
+        /* A client of a target AP: a data frame headed to the distribution
+         * system (ToDS=1, FromDS=0) whose receiver (addr1) is one of the BSSIDs. The
          * transmitter (addr2 = tx) is the client; idle clients still send
          * power-save Null frames this way. Management frames (DS bits 0) and
          * AP->STA data (FromDS) fail the check and are left out. */
-        if ((hdr[1] & 0x03) != 0x01 || memcmp(hdr + 4, s_disc_bssid, 6) != 0) {
+        if ((hdr[1] & 0x03) != 0x01 || !disc_is_target_bssid(hdr + 4)) {
             return;
         }
     }
@@ -555,12 +576,31 @@ static void hunt_start(const radio_cmd_t *cmd)
     memcpy(s_target, cmd->mac, 6);
     s_hunt_locked = cmd->channel != 0;
     s_hunt_pinned = cmd->pinned && cmd->channel != 0;
+    s_hunt_home = cmd->channel;
+    s_hunt_sweep = cmd->channel;
     s_hunt_quiet_periods = 0;
     s_hunt_hop_periods = 0;
     s_hunt_hop_limit = cmd->hop_periods ? cmd->hop_periods : HUNT_HOP_PERIODS;
     s_hunt_lost_limit = cmd->lost_periods ? cmd->lost_periods : HUNT_LOST_PERIODS;
     set_channel(cmd->channel ? cmd->channel : 1);
     set_mode(MODE_HUNT);
+}
+
+/* Next channel for a hunt that is searching: plain 1..N without a home, else
+ * home, sweep, home, next sweep, ... (the sweep skips home). */
+static uint8_t hunt_search_channel(void)
+{
+    if (!s_hunt_home) {
+        return next_channel(s_channel);
+    }
+    if (s_channel != s_hunt_home) {
+        return s_hunt_home;
+    }
+    s_hunt_sweep = next_channel(s_hunt_sweep);
+    if (s_hunt_sweep == s_hunt_home) {
+        s_hunt_sweep = next_channel(s_hunt_sweep);
+    }
+    return s_hunt_sweep;
 }
 
 static void hunt_tick(void)
@@ -582,6 +622,7 @@ static void hunt_tick(void)
 
     if (frames) {
         s_hunt_locked = true;
+        s_hunt_home = s_channel;
         s_hunt_quiet_periods = 0;
         s_hunt_hop_periods = 0;
         return;
@@ -595,10 +636,11 @@ static void hunt_tick(void)
             /* Target went silent or moved channel: search again. */
             s_hunt_locked = false;
             s_hunt_hop_periods = 0;
+            s_hunt_sweep = s_hunt_home;
         }
     } else if (++s_hunt_hop_periods >= s_hunt_hop_limit) {
         s_hunt_hop_periods = 0;
-        set_channel(next_channel(s_channel));
+        set_channel(hunt_search_channel());
     }
 }
 
@@ -647,22 +689,41 @@ static bool discover_wanted(const discover_dev_t *d)
     }
 }
 
-static void discover_start(radio_discover_filter_t filter, uint8_t channel, const uint8_t *bssid,
-                           uint16_t dwell_ms)
+/* Next channel in the hop mask after `ch` (wrapping); `ch` if the mask is empty. */
+static uint8_t next_masked_channel(uint8_t ch, uint16_t mask)
 {
+    for (int i = 0; i < MAX_CHANNEL; i++) {
+        ch = next_channel(ch);
+        if (mask & (1u << ch)) {
+            break;
+        }
+    }
+    return ch;
+}
+
+static void discover_start(const radio_cmd_t *cmd)
+{
+    const radio_discover_filter_t filter = cmd->filter;
+    const uint8_t channel = cmd->channel;
     set_mode(MODE_IDLE);
     s_dev_count = 0;
-    s_disc_dwell_ms = dwell_ms ? dwell_ms : DISCOVER_DWELL_MS;
+    s_disc_dwell_ms = cmd->dwell_ms ? cmd->dwell_ms : DISCOVER_DWELL_MS;
     s_disc_filter = filter;
     s_disc_channel = channel;
-    memcpy(s_disc_bssid, bssid ? bssid : (const uint8_t[6]){0}, 6);
+    s_disc_hop_mask = cmd->hop_mask & (uint16_t)(((1u << MAX_CHANNEL) - 1) << 1);
+    s_disc_bssid_count = cmd->bssid_count;
+    memcpy(s_disc_bssids, cmd->bssids, sizeof(s_disc_bssids));
     s_disc_cursor = 0;
     s_disc_streamed = 0;
     s_disc_prev_count = 0;
     static const char *const names[] = {"ALL", "AP", "STA", "CLIENTS"};
     proto_sendf("DISCOVER_BEGIN,%s,%u", names[filter], channel);
     led_set(40, 0, 60);
-    set_channel(channel ? channel : 1);
+    if (s_disc_hop_mask && !(channel && (s_disc_hop_mask & (1u << channel)))) {
+        set_channel(next_masked_channel(MAX_CHANNEL, s_disc_hop_mask));
+    } else {
+        set_channel(channel ? channel : 1);
+    }
     set_mode(MODE_DISCOVER);
     if (s_associated) {
         net_discover_rescan(); /* refresh host IPs for the list being opened */
@@ -721,7 +782,9 @@ static void discover_stream(void)
 static void discover_tick(void)
 {
     discover_stream();
-    if (s_disc_channel == 0) {
+    if (s_disc_hop_mask) {
+        set_channel(next_masked_channel(s_channel, s_disc_hop_mask));
+    } else if (s_disc_channel == 0) {
         set_channel(next_channel(s_channel));
     }
 }
@@ -856,7 +919,7 @@ static void radio_task(void *arg)
                 spectrum_start();
                 break;
             case CMD_DISCOVER:
-                discover_start(cmd.filter, cmd.channel, cmd.mac, cmd.dwell_ms);
+                discover_start(&cmd);
                 break;
             case CMD_CONNECT:
                 connect_start(&cmd);
@@ -948,13 +1011,20 @@ void radio_spectrum(void)
     post(&cmd);
 }
 
-void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t bssid[6],
-                    uint16_t dwell_ms)
+void radio_discover(radio_discover_filter_t filter, uint8_t channel, const uint8_t (*bssids)[6],
+                    uint8_t bssid_count, uint16_t hop_mask, uint16_t dwell_ms)
 {
-    radio_cmd_t cmd = {
-        .type = CMD_DISCOVER, .filter = filter, .channel = channel, .dwell_ms = dwell_ms};
-    if (bssid) {
-        memcpy(cmd.mac, bssid, 6); /* reused by discover_start as the CLIENTS target */
+    radio_cmd_t cmd = {.type = CMD_DISCOVER,
+                       .filter = filter,
+                       .channel = channel,
+                       .dwell_ms = dwell_ms,
+                       .hop_mask = hop_mask};
+    if (bssids) {
+        if (bssid_count > RADIO_CLIENTS_BSSID_MAX) {
+            bssid_count = RADIO_CLIENTS_BSSID_MAX;
+        }
+        memcpy(cmd.bssids, bssids, (size_t)bssid_count * 6);
+        cmd.bssid_count = bssid_count;
     }
     post(&cmd);
 }

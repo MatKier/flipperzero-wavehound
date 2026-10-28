@@ -39,6 +39,13 @@
  * Scan action is hidden on older boards, which would answer it ERR. */
 #define WH_FW_FP_MIN 17
 
+/* The board firmware version at which a client listen accepts several BSSIDs
+ * and a channel set (DISCOVER ALSO=/HOP=); older boards list one AP's clients. */
+#define WH_FW_MESH_MIN 18
+
+/* Most access points (mesh nodes of one network) a client listen covers. */
+#define WH_CLIENTS_BSSID_MAX 8
+
 /* Ports a fingerprint can report (the board's fixed scan set, see PROTOCOL.md). */
 #define WH_FP_MAX_PORTS 8
 
@@ -208,6 +215,17 @@ typedef struct {
      * via the device-search "Clients of nearby AP..." picker. */
     WhTarget clients_ap;
     bool device_search_clients; /* device search picked a nearby AP: scope to its clients */
+    /* Every AP broadcasting clients_ap's network (its mesh nodes), clients_ap
+     * first, and the channels they are on (bit n = channel n). */
+    char clients_bssids[WH_CLIENTS_BSSID_MAX][18];
+    uint8_t clients_bssid_ch[WH_CLIENTS_BSSID_MAX];
+    uint8_t clients_bssid_count;
+    uint16_t clients_channels;
+    /* A "~ Node on ch N" switch in flight: the node we left, rejoined once if
+     * the new one fails (e.g. a same-name neighbour), so the login isn't lost. */
+    bool node_switch_pending;
+    char node_prev_mac[18];
+    uint8_t node_prev_ch;
 
     /* Board Info text, filled by the UART worker between INFO_BEGIN/INFO_END
      * (guarded by results_mutex). */

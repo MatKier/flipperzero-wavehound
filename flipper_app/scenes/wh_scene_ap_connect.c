@@ -72,10 +72,25 @@ static void wh_scene_ap_connect_render(WavehoundApp* app) {
     view_dispatcher_switch_to_view(app->view_dispatcher, WhViewWidget);
 }
 
+/* A failed "~ Node on ch N" switch: rejoin the node we came from once, rather
+ * than leave the user logged out. Returns true if a rejoin was started. */
+static bool wh_scene_ap_connect_fall_back(WavehoundApp* app) {
+    if(!app->node_switch_pending) return false;
+    app->node_switch_pending = false;
+    strlcpy(app->clients_ap.mac, app->node_prev_mac, sizeof(app->clients_ap.mac));
+    app->clients_ap.channel = app->node_prev_ch;
+    wh_ap_connect(app);
+    s_state = ApcConnecting;
+    s_ticks = 0;
+    wh_scene_ap_connect_render(app);
+    return true;
+}
+
 static void wh_scene_ap_connect_success(WavehoundApp* app) {
     /* Every successful join shows the brief Connected / SSID / IP splash first;
      * the tick handler then either offers to save a fresh password or continues
      * straight to the client list. */
+    app->node_switch_pending = false;
     s_state = ApcSuccess;
     s_ticks = 0;
     wh_scene_ap_connect_render(app);
@@ -100,8 +115,10 @@ bool wh_scene_ap_connect_on_event(void* context, SceneManagerEvent event) {
         if(s_state == ApcConnecting && ++s_ticks > AP_CONNECT_TIMEOUT_TICKS) {
             snprintf(app->conn.fail_msg, sizeof(app->conn.fail_msg), "timeout");
             app->conn.connecting = false;
-            s_state = ApcFail;
-            wh_scene_ap_connect_render(app);
+            if(!wh_scene_ap_connect_fall_back(app)) {
+                s_state = ApcFail;
+                wh_scene_ap_connect_render(app);
+            }
         } else if(s_state == ApcSuccess && ++s_ticks > AP_CONNECT_SPLASH_TICKS) {
             /* Splash done: offer to save a freshly entered password, else go on. */
             if(app->login_pending_save && app->psk_buf[0]) {
@@ -120,8 +137,10 @@ bool wh_scene_ap_connect_on_event(void* context, SceneManagerEvent event) {
         wh_scene_ap_connect_success(app);
         return true;
     case WhEventConnFail:
-        s_state = ApcFail;
-        wh_scene_ap_connect_render(app);
+        if(!wh_scene_ap_connect_fall_back(app)) {
+            s_state = ApcFail;
+            wh_scene_ap_connect_render(app);
+        }
         return true;
     case WhEventApSave:
         wh_ap_store_add(
@@ -140,5 +159,6 @@ bool wh_scene_ap_connect_on_event(void* context, SceneManagerEvent event) {
 
 void wh_scene_ap_connect_on_exit(void* context) {
     WavehoundApp* app = context;
+    app->node_switch_pending = false;
     widget_reset(app->widget);
 }

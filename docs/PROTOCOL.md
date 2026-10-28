@@ -12,7 +12,7 @@ they do not understand, so ROM boot chatter from the ESP32 is harmless.
 | `PING`                | Liveness check. Board answers `PONG,<version>`.                |
 | `HUNT,<mac>,<ch>[,PIN][,DWELL=<ms>][,LOST=<s>]` | Track frames transmitted by `<mac>` on channel `<ch>`. `ch=0` hops until the target is heard. `PIN` (needs `ch>0`) keeps the radio on `<ch>` even when the target goes quiet. Optional [timing tokens](#timing-tokens): `DWELL` is the per-channel dwell while searching (default 300 ms), `LOST` the silence before a locked hunt searches again (default 8 s). |
 | `SPECTRUM`            | Sweep channels 1..N, report per-channel activity.              |
-| `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). Optional [timing token](#timing-tokens) `DWELL` (after `<bssid>` for `CLIENTS`, else after `<ch>`) sets the per-channel dwell when hopping (default 120 ms); `DEV` lines are also streamed at that cadence. |
+| `DISCOVER[,ALL\|AP\|STA\|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>][,ALSO=<bssid>/...][,HOP=<ch>/...]` | Listen **continuously**, streaming each transmitter as it is first heard, until `STOP`. `AP` keeps only access points, `STA` keeps everything else, `ALL` (default) keeps both. `CLIENTS` keeps only stations associated with `<bssid>` (required for this filter) and reports them as `DEV` lines the same way. `<ch>` 1-13 parks the radio on that channel; `0` or omitted hops all channels (pass the AP's channel with `CLIENTS`). Optional [timing token](#timing-tokens) `DWELL` (after `<bssid>` for `CLIENTS`, else after `<ch>`) sets the per-channel dwell when hopping (default 120 ms); `DEV` lines are also streamed at that cadence. v18+: `ALSO` adds more access points to a `CLIENTS` listen (up to 8 BSSIDs in all, `/`-separated), so the clients of every node of a mesh network are listed; `HOP` hops only the listed channels (`/`-separated, starting at `<ch>` if it is one of them) instead of parking or hopping all. See [Clients of a mesh](#clients-of-a-mesh). |
 | `CONNECT,<ssid_hex>,<psk_hex>[,<bssid>][,<ch>]` | Associate with an access point in station mode (v9+). `<ssid_hex>` and `<psk_hex>` are the SSID and passphrase [hex-encoded](#hex-encoded-fields); an empty `<psk_hex>` joins an open network. The optional `<bssid>` (a MAC) and `<ch>` (1-13) pin and speed up the join and may appear in either order. Promiscuous RX stays live, so a hunt keeps sampling on the AP's channel. Progress is reported as [`CONN,...`](#association) lines. |
 | `DISCONNECT`          | Drop the association and return to pure receive-only sniffing. Answered with `CONN,DOWN`. |
 | `WPS` / `WPS,STOP`    | Start / cancel WPS push-button (PBC) enrolment (v10+). On success the board reports the negotiated credentials ([`WPS,OK,...`](#wps)) and associates; `WPS,STOP` cancels an armed exchange. |
@@ -92,7 +92,35 @@ Hunting works for any transmitter MAC, not just access points: the board
 matches the frame's transmitter address (addr2) of management and data frames.
 With `ch=0`, or after `LOST` seconds of silence (default 8 s; never with `PIN`),
 it hops channels (`DWELL` per channel, default 300 ms) until it hears the target
-again.
+again. From v18 a search after silence keeps returning to the target's *home*
+channel (where it was last heard, or `<ch>` if never heard) every other dwell,
+alternating it with each other channel in turn, starting after home: for home 6,
+6, 7, 6, 8, ... 6, 13, 6, 1, ... 6, 5. A quiet target that never
+left is still caught there, and one that moved channel, such as a client roaming
+to a mesh node on another channel, is found by the sweep. A `ch=0` hunt that has
+not heard the target yet has no home and hops 1..N plainly. Older firmware always
+hops 1..N.
+
+### Clients of a mesh
+
+A mesh network or AP + extender broadcasts one SSID from several BSSIDs, and a
+client is associated with only one of them. To list the clients of the whole
+network, the app (v1.19+, firmware v18+) collects every AP in its network scan
+with the same SSID and security as the one picked and sends the others as
+`ALSO=<bssid>/<bssid>/...`; the board then accepts a client of any of them. If
+the nodes sit on different channels and the board is not associated, the app
+also sends `HOP=<ch>/<ch>/...` with just those channels, so each node's channel
+gets an equal share of listening time (typically 1/6/11) rather than 1 in 13.
+Associated, the board stays on the joined AP's channel, so only clients of
+nodes on that channel are heard; to reach the others the app re-sends
+`CONNECT` with another node's BSSID and channel (same SSID and passphrase), then
+starts a fresh `CLIENTS` listen there. For example:
+
+```
+DISCOVER,CLIENTS,6,aa:bb:cc:00:00:01,DWELL=120,ALSO=aa:bb:cc:00:00:11/aa:bb:cc:00:00:21,HOP=1/6/11
+```
+
+Older firmware ignores both tokens and lists the first BSSID's clients.
 
 ### Association
 

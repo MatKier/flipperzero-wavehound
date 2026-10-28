@@ -41,8 +41,11 @@ void wh_scene_hunt_on_enter(void* context) {
         notification_message(app->notifications, &sequence_display_backlight_enforce_on);
     }
 
-    /* PIN stays right after <ch>: older firmware only looks for it there and
+    /* While associated the board can't leave the AP's channel, so pin there:
+     * an unpinned hunt would report a search (SEEK, ?ch) the radio never does.
+     * PIN stays right after <ch>: older firmware only looks for it there and
      * ignores the timing tokens that follow. */
+    const bool pin = t->pin_channel || app->conn.connected || app->conn.connecting;
     char cmd[72];
     snprintf(
         cmd,
@@ -50,7 +53,7 @@ void wh_scene_hunt_on_enter(void* context) {
         "HUNT,%s,%u%s,DWELL=%u,LOST=%u",
         t->mac,
         t->channel,
-        t->pin_channel && t->channel ? ",PIN" : "",
+        pin && t->channel ? ",PIN" : "",
         wh_settings_hop_dwell_ms(app->settings.hop_dwell),
         wh_settings_research_s(app->settings.research));
     wh_send(app, cmd);

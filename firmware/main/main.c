@@ -152,11 +152,43 @@ static void handle_hunt(char *args)
     proto_sendf("OK,HUNT");
 }
 
+/* ALSO=<bssid>/<bssid>/...: more access points for a CLIENTS listen (the other
+ * nodes of a mesh), appended to bssids[] after the positional one. */
+static void parse_also(const char *s, uint8_t (*bssids)[6], uint8_t *count)
+{
+    while (s && *s && *count < RADIO_CLIENTS_BSSID_MAX) {
+        if (parse_mac(s, bssids[*count])) {
+            (*count)++;
+        }
+        s = strchr(s, '/');
+        if (s) {
+            s++;
+        }
+    }
+}
+
+/* HOP=<ch>/<ch>/...: hop only these channels. Returns a mask, bit n = channel n. */
+static uint16_t parse_hop(const char *s)
+{
+    uint16_t mask = 0;
+    while (s && *s) {
+        const int ch = atoi(s);
+        if (ch >= 1 && ch <= CONFIG_WH_MAX_CHANNEL) {
+            mask |= (uint16_t)(1u << ch);
+        }
+        s = strchr(s, '/');
+        if (s) {
+            s++;
+        }
+    }
+    return mask;
+}
+
 static void handle_discover(char *args)
 {
-    /* args: "[ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>]" */
-    char *f[4] = {0};
-    int n = split_args(args, f, 4);
+    /* args: "[ALL|AP|STA|CLIENTS[,<ch>[,<bssid>]]][,DWELL=<ms>][,ALSO=<bssid>/...][,HOP=<ch>/...]" */
+    char *f[8] = {0};
+    int n = split_args(args, f, 8);
     radio_discover_filter_t filter = DISCOVER_FILTER_ALL;
     int ch = 0;
 
@@ -176,16 +208,30 @@ static void handle_discover(char *args)
         proto_sendf("ERR,bad channel");
         return;
     }
-    uint8_t bssid[6];
-    if (filter == DISCOVER_FILTER_CLIENTS && (n < 3 || !parse_mac(f[2], bssid))) {
+    const bool clients = filter == DISCOVER_FILTER_CLIENTS;
+    uint8_t bssids[RADIO_CLIENTS_BSSID_MAX][6];
+    uint8_t bssid_count = 0;
+    if (clients && (n < 3 || !parse_mac(f[2], bssids[0]))) {
         proto_sendf("ERR,CLIENTS needs a BSSID: DISCOVER,CLIENTS,<ch>,<bssid>");
         return;
     }
+    if (clients) {
+        bssid_count = 1;
+    }
     /* Tokens follow the positional fields: after <bssid> for CLIENTS, else <ch>. */
+    const int from = clients ? 3 : 2;
     tokens_t t;
-    parse_tokens(f, filter == DISCOVER_FILTER_CLIENTS ? 3 : 2, n, &t);
+    parse_tokens(f, from, n, &t);
+    uint16_t hop_mask = 0;
+    for (int i = from; i < n; i++) {
+        if (clients && strncasecmp(f[i], "ALSO=", 5) == 0) {
+            parse_also(f[i] + 5, bssids, &bssid_count);
+        } else if (strncasecmp(f[i], "HOP=", 4) == 0) {
+            hop_mask = parse_hop(f[i] + 4);
+        }
+    }
     proto_sendf("OK,DISCOVER");
-    radio_discover(filter, (uint8_t)ch, filter == DISCOVER_FILTER_CLIENTS ? bssid : NULL,
+    radio_discover(filter, (uint8_t)ch, clients ? bssids : NULL, bssid_count, hop_mask,
                    (uint16_t)t.dwell_ms);
 }
 

@@ -4,6 +4,8 @@
 
 #define ITEM_SEARCH_AGAIN 0
 /* Result i is submenu index i + 1. */
+/* "~ Node on ch N" (logged in to a mesh): rejoin through a node on channel N. */
+#define ITEM_NODE_BASE 1000
 
 /* Scene state: FRESH clears the list and starts a new scan on enter; RESUME
  * keeps the results already found (set when drilling into a result's Details,
@@ -17,6 +19,31 @@ static size_t s_shown;
 static size_t s_header_count; /* count last written to the header */
 static uint8_t s_spin; /* animated scan indicator phase */
 static uint32_t s_picked_item; /* submenu index of the last picked result */
+
+/* The nodes of the picked AP's network: every AP in the scan with the same
+ * (non-hidden) SSID and security, the picked one first. Same-name neighbours
+ * slip in too; the header's AP count makes that visible. */
+static void wh_scene_target_list_collect_nodes(WavehoundApp* app, const WhTarget* ap) {
+    strlcpy(app->clients_bssids[0], ap->mac, sizeof(app->clients_bssids[0]));
+    app->clients_bssid_ch[0] = ap->channel;
+    app->clients_bssid_count = 1;
+    app->clients_channels = ap->channel ? (uint16_t)(1u << ap->channel) : 0;
+    if(!ap->name[0] || app->board_fw_version < WH_FW_MESH_MIN) return;
+
+    furi_mutex_acquire(app->results_mutex, FuriWaitForever);
+    for(size_t i = 0; i < app->result_count && app->clients_bssid_count < WH_CLIENTS_BSSID_MAX;
+        i++) {
+        const WhTarget* t = &app->results[i];
+        if(!t->is_ap || strcmp(t->mac, ap->mac) == 0 || strcmp(t->name, ap->name) != 0 ||
+           strcmp(t->security, ap->security) != 0)
+            continue;
+        app->clients_bssid_ch[app->clients_bssid_count] = t->channel;
+        strlcpy(
+            app->clients_bssids[app->clients_bssid_count++], t->mac, sizeof(app->clients_bssids[0]));
+        if(t->channel) app->clients_channels |= (uint16_t)(1u << t->channel);
+    }
+    furi_mutex_release(app->results_mutex);
+}
 
 static void wh_scene_target_list_callback(void* context, uint32_t index) {
     WavehoundApp* app = context;
@@ -48,7 +75,9 @@ static const char* wh_scene_target_list_noun(WhSearchKind kind) {
 }
 
 /* Build the DISCOVER command: AP listens always hop; device listens may be
- * parked on one channel; client listens park on the chosen AP's channel. */
+ * parked on one channel; client listens park on the chosen AP's channel, or
+ * hop only its mesh nodes' channels when they differ. While logged in the board
+ * can't leave the AP's channel, so it parks there. */
 static void wh_scene_target_list_send_discover(WavehoundApp* app) {
     const WhSearchKind kind = app->search_kind;
     const bool aps = kind == WhSearchAccessPoints;
@@ -57,15 +86,31 @@ static void wh_scene_target_list_send_discover(WavehoundApp* app) {
 
     const unsigned dwell = wh_settings_scan_dwell_ms(app->settings.scan_dwell);
 
-    char cmd[64];
+    char cmd[224]; /* 8 BSSIDs + 8 channels stays under the board's 256 */
     if(clients) {
-        snprintf(
+        int len = snprintf(
             cmd,
             sizeof(cmd),
             "DISCOVER,CLIENTS,%u,%s,DWELL=%u",
             channel,
             app->clients_ap.mac,
             dwell);
+        /* The other nodes; clients_ap may be any of them after a node switch. */
+        const char* also = ",ALSO=";
+        for(uint8_t i = 0; i < app->clients_bssid_count; i++) {
+            if(strcmp(app->clients_bssids[i], app->clients_ap.mac) == 0) continue;
+            len += snprintf(cmd + len, sizeof(cmd) - len, "%s%s", also, app->clients_bssids[i]);
+            also = "/";
+        }
+        const bool logged_in = app->conn.connected || app->conn.connecting;
+        if(!logged_in && (app->clients_channels & ~(1u << channel))) {
+            const char* sep = ",HOP=";
+            for(unsigned ch = 1; ch <= WH_MAX_CHANNEL; ch++) {
+                if(!(app->clients_channels & (1u << ch))) continue;
+                len += snprintf(cmd + len, sizeof(cmd) - len, "%s%u", sep, ch);
+                sep = "/";
+            }
+        }
     } else {
         snprintf(cmd, sizeof(cmd), "DISCOVER,%s,%u,DWELL=%u", aps ? "AP" : "STA", channel, dwell);
     }
@@ -92,9 +137,16 @@ static void wh_scene_target_list_set_header(WavehoundApp* app, size_t count) {
         static const char* const scan_frames[] = {
             "[#   ]", "[ #  ]", "[  # ]", "[   #]", "[  # ]", "[ #  ]"};
         const char* bar = scan_frames[s_spin % (sizeof(scan_frames) / sizeof(scan_frames[0]))];
-        snprintf(
-            header, sizeof(header), "Scan %s %u %s", bar, (unsigned)count,
-            wh_scene_target_list_noun(app->search_kind));
+        if(app->search_kind == WhSearchClients && app->clients_bssid_count > 1) {
+            /* A mesh: say how many nodes, so a neighbour reusing the SSID shows. */
+            snprintf(
+                header, sizeof(header), "Scan %s %u on %u APs", bar, (unsigned)count,
+                (unsigned)app->clients_bssid_count);
+        } else {
+            snprintf(
+                header, sizeof(header), "Scan %s %u %s", bar, (unsigned)count,
+                wh_scene_target_list_noun(app->search_kind));
+        }
     }
     submenu_set_header(app->submenu, header);
 }
@@ -122,6 +174,39 @@ static size_t wh_scene_target_list_sync_rows(WavehoundApp* app) {
     return count;
 }
 
+/* Logged in, the board only hears the joined node's channel. Offer one row per
+ * other channel a node of this network is on; picking it rejoins through that
+ * node. Needs the password to rejoin (a WPS join may not have surfaced it). */
+static void wh_scene_target_list_add_node_rows(WavehoundApp* app) {
+    if(app->search_kind != WhSearchClients || !app->conn.connected) return;
+    if(!app->psk_buf[0] && strcmp(app->clients_ap.security, "Open") != 0) return;
+    const uint16_t others = app->clients_channels & ~(1u << app->clients_ap.channel);
+    char label[24];
+    for(unsigned ch = 1; ch <= WH_MAX_CHANNEL; ch++) {
+        if(!(others & (1u << ch))) continue;
+        snprintf(label, sizeof(label), "~ Node on ch %u", ch);
+        submenu_add_item(
+            app->submenu, label, ITEM_NODE_BASE + ch, wh_scene_target_list_callback, app);
+    }
+}
+
+/* Rejoin the network through its first node on `ch`; the connect splash then
+ * returns to a fresh client list on that channel. */
+static void wh_scene_target_list_switch_node(WavehoundApp* app, uint8_t ch) {
+    for(uint8_t i = 0; i < app->clients_bssid_count; i++) {
+        if(app->clients_bssid_ch[i] != ch) continue;
+        strlcpy(app->node_prev_mac, app->clients_ap.mac, sizeof(app->node_prev_mac));
+        app->node_prev_ch = app->clients_ap.channel;
+        app->node_switch_pending = true;
+        strlcpy(app->clients_ap.mac, app->clients_bssids[i], sizeof(app->clients_ap.mac));
+        app->clients_ap.channel = ch;
+        app->login_pending_save = false; /* same password as the node we leave */
+        wh_ap_connect(app);
+        scene_manager_next_scene(app->scene_manager, WhSceneApConnect);
+        return;
+    }
+}
+
 /* Clear the list and (re)start a continuous scan. */
 static void wh_scene_target_list_restart(WavehoundApp* app) {
     furi_mutex_acquire(app->results_mutex, FuriWaitForever);
@@ -134,6 +219,7 @@ static void wh_scene_target_list_restart(WavehoundApp* app) {
     submenu_reset(app->submenu);
     submenu_add_item(
         app->submenu, "~ Search again", ITEM_SEARCH_AGAIN, wh_scene_target_list_callback, app);
+    wh_scene_target_list_add_node_rows(app);
     wh_scene_target_list_set_header(app, 0);
 
     if(app->uart) wh_scene_target_list_send_discover(app);
@@ -146,6 +232,7 @@ static void wh_scene_target_list_resume(WavehoundApp* app) {
     submenu_reset(app->submenu);
     submenu_add_item(
         app->submenu, "~ Search again", ITEM_SEARCH_AGAIN, wh_scene_target_list_callback, app);
+    wh_scene_target_list_add_node_rows(app);
 
     const size_t count = wh_scene_target_list_sync_rows(app);
     wh_scene_target_list_set_header(app, count);
@@ -203,6 +290,10 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
         wh_scene_target_list_restart(app);
         return true;
     }
+    if(event.event > ITEM_NODE_BASE && event.event <= ITEM_NODE_BASE + WH_MAX_CHANNEL) {
+        wh_scene_target_list_switch_node(app, (uint8_t)(event.event - ITEM_NODE_BASE));
+        return true;
+    }
 
     WhTarget picked_target;
     bool picked = false;
@@ -220,6 +311,7 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
             /* Device search scoped to this AP: list the stations associated with
              * it, on its channel. The next scan reads clients_ap. */
             app->clients_ap = picked_target;
+            wh_scene_target_list_collect_nodes(app, &picked_target);
             app->device_search_clients = true;
             /* Offer to log in to the AP first (so a silent client can later be
              * elicited); only when the board firmware supports it. The login
@@ -229,9 +321,10 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
                 return true;
             }
         } else {
-            /* MAC hunt only needs the channel number to pin the typed MAC. */
+            /* MAC hunt only needs the AP's channel to start on. Not pinned: a
+             * client that roams to a mesh node on another channel is re-found. */
             app->target.channel = picked_target.channel;
-            app->target.pin_channel = true;
+            app->target.pin_channel = false;
         }
         app->channel_pick_pending = true;
         scene_manager_search_and_switch_to_previous_scene(
@@ -240,11 +333,10 @@ bool wh_scene_target_list_on_event(void* context, SceneManagerEvent event) {
     }
 
     app->target = picked_target;
-    /* A device search parked on a channel by the user keeps the hunt there too;
-     * a client is always on its AP's channel, so pin the hunt there as well. */
-    app->target.pin_channel =
-        (app->search_kind == WhSearchDevices && app->device_channel != 0) ||
-        app->search_kind == WhSearchClients;
+    /* A device search parked on a channel by the user keeps the hunt there too.
+     * A client starts on its AP's channel but isn't pinned, so a roam to a mesh
+     * node on another channel is re-found (the hunt scene pins while logged in). */
+    app->target.pin_channel = app->search_kind == WhSearchDevices && app->device_channel != 0;
 
     /* Keep the found list when we come back from Details, and land back on the
      * row just picked. */
